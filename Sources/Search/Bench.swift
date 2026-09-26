@@ -548,6 +548,11 @@ final class Bench {
                 "history": browser.recalling,
                 "downloads": browser.hoarding,
                 "bookmarks": browser.bookmarking,
+                // The dropdown off the button, the ⇧⌘B card in it, and how
+                // many are kept, for every window alike.
+                "bookmarksOpen": browser.bookmarksOpen,
+                "bookmarkCard": browser.bookmarkCard != nil,
+                "bookmarkCount": browser.bookmarks.count,
                 "import": browser.bringingIn != nil,
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
