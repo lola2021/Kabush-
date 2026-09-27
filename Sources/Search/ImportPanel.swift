@@ -36,39 +36,49 @@ struct ImportPanel: View {
         let text: String
     }
 
-    var body: some View {
-        Plate("Bring things over", width: 580, close: { browser.bringingIn = nil }) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Nothing in the other browser changes. Passwords go into your keychain.")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.muted)
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Nothing in the other browser changes. Passwords go into your keychain.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(Palette.muted)
 
-                if looking {
-                    HStack(spacing: 8) {
-                        Ring(size: 10)
-                        Text("Looking on this Mac…").font(.system(size: 12)).foregroundStyle(Palette.muted)
-                    }
-                } else if sources.isEmpty {
-                    Card { Nothing("No other browser found on this Mac.") }
-                } else {
-                    Caption("On this Mac")
-                    Card {
-                        ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
-                            if index > 0 { Rule() }
-                            Row(name: source.name, detail: detail(of: source), chosen: pick == source) {
-                                guard !bringing else { return }
-                                pick = source
-                                brought = nil
-                            }
+            if looking {
+                HStack(spacing: 8) {
+                    Ring(size: 10)
+                    Text("Looking on this Mac…").font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
+            } else if sources.isEmpty {
+                Card { Nothing("No other browser found on this Mac.") }
+            } else {
+                Caption("On this Mac")
+                Card {
+                    ForEach(Array(sources.enumerated()), id: \.element.id) { index, source in
+                        if index > 0 { Rule() }
+                        Row(name: source.name, detail: detail(of: source), chosen: pick == source) {
+                            guard !bringing else { return }
+                            pick = source
+                            brought = nil
                         }
                     }
                 }
+            }
 
-                notes
+            notes
 
-                if let source = pick {
-                    options(for: source)
-                }
+            if let source = pick {
+                options(for: source)
+            }
+        }
+    }
+
+    var body: some View {
+        Plate("Bring things over", width: 580, close: { browser.bringingIn = nil }) {
+            // As tall as it needs to be, and scrolling past what the window
+            // can hold: many browsers, or a small window.
+            ViewThatFits(in: .vertical) {
+                content
+                ScrollView { content }
+                    .scrollBounceBehavior(.basedOnSize)
             }
         } foot: {
             VStack(alignment: .leading, spacing: 10) {
@@ -167,18 +177,19 @@ struct ImportPanel: View {
                 }
                 Rule()
             }
-            Line("Passwords", source.asksForKey
+            // A kind the browser has none of is said so, and can't be picked.
+            Line("Passwords", preview?.passwords == 0 ? "None in \(source.name)" : source.asksForKey
                  ? "macOS asks once for \(source.name)'s keychain key"
                  : "Read from \(source.name)'s own files, unless it has a primary password") {
-                Switch(on: $wantsPasswords)
+                option($wantsPasswords, none: preview?.passwords == 0)
             }
             Rule()
-            Line("Bookmarks", "In a “\(source.name)” folder, or at the top if you have none yet") {
-                Switch(on: $wantsBookmarks)
+            Line("Bookmarks", preview?.bookmarks == 0 ? "None in \(source.name)" : "In a “\(source.name)” folder, or at the top if you have none yet") {
+                option($wantsBookmarks, none: preview?.bookmarks == 0)
             }
             Rule()
-            Line("History", "The last \((preview.map { $0.places } ?? 3000).formatted()) places") {
-                Switch(on: $wantsHistory)
+            Line("History", preview?.places == 0 ? "None in \(source.name)" : "The last \((preview.map { $0.places } ?? 3000).formatted()) places") {
+                option($wantsHistory, none: preview?.places == 0)
             }
             if !extensions.isEmpty {
                 Rule()
@@ -207,8 +218,21 @@ struct ImportPanel: View {
         func count(_ n: Int, _ one: String) -> String { n == 1 ? "1 \(one)" : "\(n.formatted()) \(one)s" }
         var parts: [String] = []
         if let choices = profiles[source.id], choices.count > 1 { parts.append("\(choices.count) profiles") }
-        parts += [count(preview.bookmarks, "bookmark"), count(preview.places, "place"), count(preview.passwords, "password")]
-        return parts.joined(separator: " · ")
+        // What it has; a kind it has none of isn't worth a word.
+        for (n, one) in [(preview.bookmarks, "bookmark"), (preview.places, "place"), (preview.passwords, "password")] where n > 0 {
+            parts.append(count(n, one))
+        }
+        return parts.isEmpty ? "Nothing to bring in" : parts.joined(separator: " · ")
+    }
+
+    /// A kind's switch; off and out of reach when there is none of it.
+    @ViewBuilder
+    private func option(_ on: Binding<Bool>, none: Bool) -> some View {
+        if none {
+            Switch(on: .constant(false)).disabled(true).opacity(0.4)
+        } else {
+            Switch(on: on)
+        }
     }
 
     /// The store extensions it has that aren't here already.
@@ -257,10 +281,16 @@ struct ImportPanel: View {
     private func bring(from source: ImportSource) {
         let profile = profile(of: source)
         let extensions = wantsExtensions ? fresh(source) : []
+        // A kind it has none of isn't read at all: no keychain question for
+        // a browser with no passwords.
+        let preview = previews[key(source, profile)]
+        let passwords = wantsPasswords && preview?.passwords != 0
+        let marks = wantsBookmarks && preview?.bookmarks != 0
+        let places = wantsHistory && preview?.places != 0
         bringing = true
         var said: [Int: Said] = [:]
         let group = DispatchGroup()
-        if wantsPasswords {
+        if passwords {
             group.enter()
             // The one moment macOS asks for the key, if the browser keeps one.
             DispatchQueue.global(qos: .userInitiated).async {
@@ -282,13 +312,13 @@ struct ImportPanel: View {
                 }
             }
         }
-        if wantsBookmarks {
+        if marks {
             let (added, already) = browser.takeBookmarks(from: source, profile: profile)
             said[1] = Said(ok: true, text: added == 0 && already == 0 ? "No bookmarks in \(source.name)"
                            : already == 0 ? "\(added.formatted()) bookmarks"
                            : "\(added.formatted()) new bookmarks, \(already.formatted()) already here")
         }
-        if wantsHistory {
+        if places {
             group.enter()
             browser.takePlaces(from: source, profile: profile) { count in
                 said[2] = Said(ok: true, text: "\(count.formatted()) places")
