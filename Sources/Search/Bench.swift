@@ -735,6 +735,38 @@ final class Bench {
                 }
             }
 
+        case "import":
+            // Another browser's passwords, bookmarks and history, brought in
+            // through the same calls the Welcome and the panels make. Only on
+            // a SEARCH_PROBE run, which reads made-up profiles from its own
+            // folder's Import/ (see Chromium.base), never a real browser.
+            guard Store.testing else { answer(["error": "import only works on a --test run"]); return }
+            let found = Chromium.installed()
+            guard let source = found.first(where: { $0.name == request["from"] as? String }) else {
+                answer(["found": found.map(\.name)])
+                return
+            }
+            let what = request["what"] as? [String] ?? []
+            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles.map(\.lastPathComponent)]
+            if what.contains("bookmarks") {
+                let (added, already) = browser.bookmarks.take(Chromium.bookmarks(in: source), from: source.name)
+                out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
+                                    "top": browser.bookmarks.roots.map(\.title)]
+            }
+            if what.contains("history") {
+                let places = Chromium.places(in: source)
+                for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
+                browser.history.settle()
+                out["places"] = places.count
+            }
+            if what.contains("passwords") {
+                let outcome = Result { try Chromium.read(source) }
+                if case .success(let read) = outcome { out["read"] = read.logins.count }
+                browser.took(outcome, from: source)
+                out["saved"] = browser.saved.count
+            }
+            answer(out)
+
         case "menu":
             // The Bookmarks menu as it is about to open: the menu bar
             // told it is being tracked, SwiftUI's own update run on it, its

@@ -68,9 +68,13 @@ final class Browser: NSObject, ObservableObject {
     @discardableResult
     func takeBookmarks(from source: Chromium.Source) -> Int {
         let found = Chromium.bookmarks(in: source)
-        bookmarks.take(found, from: source.name)
-        let count = Bookmarks.count(found)
-        announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
+        let (count, already) = bookmarks.take(found, from: source.name)
+        announce(
+            Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
+                : count == 0 ? "The bookmarks from \(source.name) were all here already"
+                : already == 0 ? "\(count) bookmarks from \(source.name)"
+                : "\(count) new bookmarks from \(source.name), \(already) already here"
+        )
         let urls = Bookmarks.urls(found)
         DispatchQueue.global(qos: .utility).async {
             let icons = Chromium.icons(in: source, for: urls)
