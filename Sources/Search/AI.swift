@@ -60,9 +60,9 @@ enum AIProvider: String, CaseIterable, Identifiable {
     var defaultModel: String {
         switch self {
         case .anthropic: return "claude-haiku-4-5"
-        case .openAI: return "gpt-5-mini"
-        case .gemini: return "gemini-2.5-flash"
-        case .openRouter: return "google/gemini-2.5-flash"
+        case .openAI: return "gpt-5.4-mini"
+        case .gemini: return "gemini-3.8-flash"
+        case .openRouter: return "google/gemini-3.8-flash"
         case .ollama, .lmStudio: return ""
         }
     }

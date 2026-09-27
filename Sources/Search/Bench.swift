@@ -1155,6 +1155,13 @@ final class Bench {
                         answer(["error": error.localizedDescription, "text": text])
                     }
                 }
+            case "signin":
+                // OpenRouter's sign-in, against the stand-in: the tab it opens,
+                // and a moment later whether a key is kept.
+                AISignIn.start(in: browser)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                    answer(["kept": AIKeys.hint(for: .openRouter) ?? "", "waiting": AISignIn.waiting, "tabs": browser.tabs.count])
+                }
             case "read":
                 // What of the page would go to the model, and nothing sent.
                 guard let tab = find(request, in: browser) else { answer(missing(request)); return }

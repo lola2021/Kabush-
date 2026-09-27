@@ -186,6 +186,29 @@ final class AIClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         return request
     }
 
+    /// OpenRouter's one-time code, and the flow's verifier, for a key of
+    /// the account's own (see AISignIn).
+    func exchange(code: String, verifier: String) async throws -> String {
+        let url = AIProvider.openRouter.base.appendingPathComponent("auth/keys")
+        guard Self.allowed(url, for: .openRouter) else { throw AIError.refusedHost }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code, "code_verifier": verifier, "code_challenge_method": "S256"])
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request, delegate: self)
+        } catch let error as URLError {
+            throw AIError.unreachable(Self.reason(error, .openRouter))
+        }
+        guard let http = response as? HTTPURLResponse else { throw AIError.unreadable }
+        guard (200..<300).contains(http.statusCode) else { throw AIError.http(http.statusCode, Self.said(data, hiding: nil)) }
+        guard let key = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["key"] as? String,
+              !key.isEmpty, key.count < 400
+        else { throw AIError.unreadable }
+        return key
+    }
+
     // MARK: - reading
 
     /// The text in one event, for each way of writing.
