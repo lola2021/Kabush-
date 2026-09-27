@@ -1105,6 +1105,13 @@ extension Extensions: WKWebExtensionControllerDelegate {
     /// the space of the window in front (see Windows.swift). A popup-type
     /// window is a window like the others here.
     func webExtensionController(_ controller: WKWebExtensionController, openNewWindowUsing configuration: WKWebExtension.WindowConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionWindow)? {
+        // A private window isn't something an extension can have here: made
+        // as a normal one, its pages would land in the normal space's store
+        // and History while the extension believed them private. Refused,
+        // as Chrome refuses when incognito isn't allowed (Security).
+        if configuration.shouldBePrivate {
+            throw NSError(domain: "Search", code: 2, userInfo: [NSLocalizedDescriptionKey: "Private windows can't be opened by extensions."])
+        }
         for url in configuration.tabURLs { try Extensions.mayOpen(url) }
         let fresh = Browser(record: WindowRecord(space: browser?.spaceID ?? Space.firstID))
         for (index, url) in configuration.tabURLs.enumerated() {
