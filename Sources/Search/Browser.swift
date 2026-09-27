@@ -921,8 +921,12 @@ final class Browser: NSObject, ObservableObject {
         // the one that happened to ask for it.
         Favicons.shared.arrived = { [weak self] host, image in
             guard let self else { return }
-            for tab in tabs + parkedTabs where tab.address?.host()?.lowercased() == host {
-                tab.icon = image
+            let lower = host.lowercased()
+            for tab in tabs + parkedTabs {
+                guard let tabHost = tab.address?.host()?.lowercased() else { continue }
+                if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
+                    tab.icon = image
+                }
             }
         }
         // The little window's own three buttons.

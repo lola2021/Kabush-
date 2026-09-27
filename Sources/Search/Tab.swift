@@ -305,7 +305,10 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     private func adoptIcon() {
-        guard let host = address?.host()?.lowercased() else { return }
+        guard let host = address?.host()?.lowercased() else {
+            icon = nil
+            return
+        }
         icon = Favicons.shared.cached(host)
     }
 
@@ -568,7 +571,9 @@ final class Tab: ObservableObject, Identifiable {
                         if fresh == self.heldOver { return }
                         self.held = nil
                     }
-                    let moved = fresh.host() != self.address?.host()
+                    let freshHost = fresh.host()?.lowercased()
+                    let currentHost = self.address?.host()?.lowercased()
+                    let moved = freshHost != currentHost
                     self.address = fresh
                     // Within the same origin — history.pushState, a fragment —
                     // the page on screen is the one at the new address.

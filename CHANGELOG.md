@@ -100,6 +100,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A pinned extension's popup opens from its button after you move the tabs from across the top to the column, or back, instead of from somewhere else in the window: the row being taken away kept the button's place for itself. Thanks [@kinnrai](https://github.com/kinnrai) ([#254](https://github.com/driceroland/Search/pull/254))
 - The `./bench` skill has coding agents put a page's picture in this account's own temporary folder instead of the shared `/tmp`, where anything else on the Mac could read a screenshot of a signed-in page or swap the file. Thanks [@Hyp4tia](https://github.com/Hyp4tia) ([#236](https://github.com/driceroland/Search/pull/236))
 - The bookmarks list stays open while you reach for a bookmark with the column folded away: the column no longer folds under it as the pointer crosses the page, and folds as soon as the list closes. The extensions menu is held the same way. Thanks [@merttopuz](https://github.com/merttopuz) ([#89](https://github.com/driceroland/Search/pull/89), [#88](https://github.com/driceroland/Search/issues/88))
+- A tab no longer wears another site's icon: an icon still on its way from the site the tab has just left is not put on it, the www. and bare address of a site share one, and an icon a page names by a relative path is found. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#216](https://github.com/driceroland/Search/pull/216), [#181](https://github.com/driceroland/Search/issues/181))
 
 ## 1.0.3 — 24 September 2026
 
