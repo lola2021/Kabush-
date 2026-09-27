@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- New tabs can open at the top of the sidebar, under the pinned ones, instead of the bottom — ⌘T's and links opened beside the page alike. Off unless you turn it on in Settings › Tabs › New tabs at the top.
 - Switching spaces, the space's name shows for a moment beside its icon, where the tabs are, rather than at the bottom of the window; with the tabs folded away it still shows at the bottom.
 - A double-click on the pinned tab you are on takes it back to the page it was pinned at, wherever you have wandered since; already there, it changes the pin's letter as before. Thanks [@armin-ahmadii](https://github.com/armin-ahmadii) for the idea ([#141](https://github.com/driceroland/Search/issues/141))
 - A pinned tab shows the loading ring while its page comes, as other tabs do, in the bar and the column.

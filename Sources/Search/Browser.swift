@@ -1265,8 +1265,8 @@ final class Browser: NSObject, ObservableObject {
         // never gone to cleared away — a row of identical empty tabs is what
         // pressing ⌘T twice, or holding it, used to leave.
         if let blank = tabs.last(where: { $0.isBlank && !$0.bench && !$0.shy }) {
-            if let end = tabs.indices.last, tabs.firstIndex(where: { $0.id == blank.id }) != end {
-                move(blank, to: end)
+            if !tabs.isEmpty, tabs.firstIndex(where: { $0.id == blank.id }) != placeForBlank {
+                move(blank, to: placeForBlank)
             }
             if activeID != blank.id { leaving() }
             activeID = blank.id
@@ -1279,6 +1279,7 @@ final class Browser: NSObject, ObservableObject {
         }
         let tab = Tab()
         adopt(tab)
+        if onTop { move(tab, to: placeForBlank) }
         leaving()
         activeID = tab.id
         summoning = false
@@ -1927,9 +1928,17 @@ final class Browser: NSObject, ObservableObject {
     /// them. A link from another app, with a pin in front, landed between two
     /// (#219).
     func placeForNew() -> Int {
+        if onTop { return pinnedCount }
         guard let here = tabs.firstIndex(where: { $0.id == activeID }) else { return tabs.count }
         return max(here + 1, pinnedCount)
     }
+
+    /// New tabs go to the top of the column, under the pins (Settings ›
+    /// Tabs, with the tabs in a sidebar).
+    var onTop: Bool { prefs.sidebar && prefs.newTabsOnTop }
+
+    /// Where ⌘T's tab goes: the end of the row, or the top of the column.
+    private var placeForBlank: Int { onTop ? pinnedCount : tabs.count - 1 }
 
     /// A tab made outside the row — a peek being kept — put in it at `index`.
     func insert(_ tab: Tab, at index: Int) {
