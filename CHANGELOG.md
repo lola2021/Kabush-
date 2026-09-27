@@ -26,6 +26,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- ⌘K always opens Search's list of open pages, on every page, pinned ones included. Since pages got their shortcuts first, Slack, X, GitHub and ChatGPT kept it for their own search. ([#238](https://github.com/driceroland/Search/issues/238))
 - An extension talking to an app on the Mac finds a host registered with Vivaldi or with Opera: both keep their `NativeMessagingHosts` folder where Chrome, Chromium, Edge, Brave and Arc keep theirs, and Search reads them all now. The two were already browsers it brings passwords and bookmarks in from, so the folders it reads name the same browsers the import list does. Thanks [@gabrielemeksiz-ui](https://github.com/gabrielemeksiz-ui) ([#302](https://github.com/driceroland/Search/pull/302))
 - A tab's × closes it in the tab bar folded away with ⌘S and brought back over the page, where the × showed under the pointer and a click on it did nothing.
 - "Join from the app" works again on Zoom, Teams, Slack and the like: their pages open the app from a frame of their own, which 1.0.3 ignored along with ads' frames. A frame of the page's own site may ask now, and Search still asks you before opening the app ([#255](https://github.com/driceroland/Search/issues/255)).

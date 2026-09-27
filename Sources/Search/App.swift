@@ -786,6 +786,10 @@ struct ContentView: View {
     /// Search's keys are Search's. The keys that make and close tabs and move
     /// between them stay Search's first, as Chrome keeps them its own.
     ///
+    /// ⌘K is always Search's, on every page: the way to any open page is
+    /// the one key that must never be taken (Drice; #238). Slack, X, GitHub
+    /// and ChatGPT use it themselves, and given it first they kept it.
+    ///
     /// ⌘← and ⌘→ are Search's too while nothing is being typed: WebKit takes
     /// them to scroll the page sideways and never hands them back, so
     /// passing them on left them dead for going back and forward (#324).
@@ -793,6 +797,7 @@ struct ContentView: View {
         let reserved = (key == "t") || (key == "w" && !shifted) || (key == "n" && shifted)
             || ((key == "[" || key == "]" || key == "{" || key == "}") && shifted)
             || (key == "z" && browser.veiling)
+            || (key == "k" && !shifted)
             || (!shifted && (event.keyCode == 123 || event.keyCode == 124) && !caretIn(event))
         guard !reserved, event.window?.firstResponder is PageView else { return false }
         if let passed = ContentView.passed, PageView.same(passed, event) {
