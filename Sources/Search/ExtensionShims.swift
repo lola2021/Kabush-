@@ -741,6 +741,11 @@ enum ExtensionShims {
             if (background) { sendResponse("pong"); return; }
             return true;
           }
+          // Search's own envelopes come from this extension only: another
+          // extension (onMessageExternal) could otherwise speak as one of its
+          // user scripts, or as a frame of its own.
+          const fromHere = !!(sender && sender.id === runtime.id);
+          if (message && (message.__searchUserScript === true || message.__searchToFrame) && !fromHere) return;
           if (message && message.__searchUserScript === true) {
             const route = root.__searchUserScriptMessage;
             return route && route(message.message, sender, sendResponse) && !settled ? true : undefined;
