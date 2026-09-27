@@ -48,6 +48,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Address suggestions keep up with a long history: plain addresses are matched as bytes, and only the best three are kept while the history is read, instead of a suggestion made for every match and all of them sorted on every key. The list is the same. Thanks [@Vedaant-Rajoo](https://github.com/Vedaant-Rajoo) ([#306](https://github.com/driceroland/Search/pull/306)), and [@TesterPen0812](https://github.com/TesterPen0812) for measuring it ([#200](https://github.com/driceroland/Search/issues/200))
 - The site card grows to show a connection's details in full, with Show Certificate and Back, and shrinks again on Back, where it kept its first size and cut them off. Thanks [@kinnrai](https://github.com/kinnrai) ([#258](https://github.com/driceroland/Search/pull/258))
 - The Web Inspector docked beside a page is still there when you come back to its tab. Switching away took it off, and back on the tab the page sat short beside an empty space, black or white with the look, where it had been; one tab's inspector no longer stays beside another tab's page either. Thanks [@ductan2](https://github.com/ductan2) ([#278](https://github.com/driceroland/Search/pull/278))
+- The floating video moves, or sizes from its corner, on the first click: the first press on the picture used to go only to making its window the one in front, and it moved on the second. Thanks [@teh33](https://github.com/teh33) ([#279](https://github.com/driceroland/Search/pull/279))
 
 ## 1.0.3 — 24 September 2026
 
