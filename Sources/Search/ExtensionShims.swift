@@ -2503,6 +2503,11 @@ enum ExtensionShims {
         "readingList": "readingList",
         "userScripts": "userScripts",
         "identity": "identity",
+        "search": "search",
+        "notifications": "notifications",
+        "idle": "idle",
+        "power": "power",
+        "tts": "tts",
     ]
 
     /// What this extension asked for: the names in its manifest and any
@@ -2987,7 +2992,9 @@ enum ExtensionShims {
         // MARK: search
         case "search.query":
             let spec = first as? [String: Any] ?? [:]
-            guard let url = browser.destination(for: spec["text"] as? String ?? "") else { return nil }
+            // Words to search for, as in Chrome — never an address, file:
+            // and data: included, which the address field would take.
+            guard let url = browser.searchURL(for: spec["text"] as? String ?? "") else { return nil }
             switch spec["disposition"] as? String {
             case "NEW_TAB", "NEW_WINDOW": browser.open(url, foreground: true)
             default: browser.visit(url)
