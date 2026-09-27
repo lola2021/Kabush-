@@ -1743,7 +1743,11 @@ enum ExtensionShims {
               blind.forEach((t, i) => {
                 const d = info && info[i];
                 if (!d) return;
-                try { if (d.url) t.url = d.url; if (d.title && !t.title) t.title = d.title; } catch (e) {}
+                try {
+                  if (d.url) t.url = d.url;
+                  if (d.title && !t.title) t.title = d.title;
+                  if (d.favIconUrl && !t.favIconUrl) t.favIconUrl = d.favIconUrl;
+                } catch (e) {}
               });
             }, () => {}),
             placed.length && native("tabs.groups", [placed.map((t) => t.index)]).then((ids) => {
@@ -1786,15 +1790,16 @@ enum ExtensionShims {
         }
         for (const name of ["get", "getAll", "getCurrent", "getLastFocused", "create"]) mendResult(chrome.windows, name);
         // Listeners given a tab: the tab is mended before they see it.
-        const mendArgs = (target, positions) => {
+        const mendArgs = (target, positions, told) => {
           if (!target || typeof target.addListener !== "function") return;
           const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
           const wrapped = new Map();
           put(target, "addListener", (listener, ...rest) => {
+            const state = new Map();
             const w = function (...args) {
               const pending = mend(positions.map((i) => args[i]));
-              if (!pending) return listener.apply(this, args);
-              pending.then(() => listener.apply(this, args));
+              if (!pending) { if (told) told(args, state); return listener.apply(this, args); }
+              pending.then(() => { if (told) told(args, state); listener.apply(this, args); });
             };
             wrapped.set(listener, w);
             return add(w, ...rest);
@@ -1803,7 +1808,25 @@ enum ExtensionShims {
           put(target, "hasListener", (listener) => wrapped.has(listener));
         };
         mendArgs(chrome.tabs.onCreated, [0]);
-        mendArgs(chrome.tabs.onUpdated, [2]);
+        // What changed, in onUpdated's changeInfo. Without host access
+        // WebKit blanks url and title there ("") and leaves favIconUrl out,
+        // and a tab manager, or an extension watching its sign-in tab, reads
+        // them there. A blanked one is filled from the tab; one left out is
+        // added when it differs from what this listener last saw of the tab.
+        const told = seesTabs ? (args, state) => {
+          const info = args[1], tab = args[2];
+          if (!info || typeof info !== "object" || !isTab(tab) || !tab.url) return;
+          const before = state.get(tab.id);
+          const fill = (key, changed) => {
+            const value = tab[key];
+            if (value && (info[key] === "" || (info[key] === undefined && changed))) try { info[key] = value; } catch (e) {}
+          };
+          fill("url", before ? before.url !== tab.url : info.status === "loading");
+          fill("title", !!before && before.title !== tab.title);
+          fill("favIconUrl", !!before && before.favIconUrl !== tab.favIconUrl);
+          state.set(tab.id, { url: tab.url, title: tab.title, favIconUrl: tab.favIconUrl });
+        } : null;
+        mendArgs(chrome.tabs.onUpdated, [2], told);
         mendArgs(chrome.action && chrome.action.onClicked, [0]);
         mendArgs(chrome.contextMenus && chrome.contextMenus.onClicked, [1]);
         mendArgs(chrome.menus && chrome.menus.onClicked, [1]);
@@ -2748,6 +2771,30 @@ enum ExtensionShims {
     /// courtesy to honest code, the shim runs beside the extension's own,
     /// so the one that counts is here. The manifest is the one WebKit
     /// already holds, not the file read again on every call.
+    /// A tab's icon for favIconUrl: the picture the tab wears, as a small
+    /// PNG. Search keeps icons as pictures, not addresses, and Chrome's
+    /// favIconUrl may be a data: URL. Made once per site and kept.
+    private static var favIcons: [String: String] = [:]
+    static func forgetIcons() { favIcons.removeAll() }
+
+    private static func favIconURL(_ tab: Tab) -> String? {
+        guard let host = tab.address?.host(), let icon = tab.icon ?? Favicons.shared.cached(host) else { return nil }
+        if let known = favIcons[host] { return known }
+        let side = 32
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                            bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        icon.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        let url = "data:image/png;base64," + png.base64EncodedString()
+        if favIcons.count > 500 { favIcons.removeAll() }
+        favIcons[host] = url
+        return url
+    }
+
     static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
         let asked = (context.webExtension.manifest["permissions"] as? [Any] ?? []).compactMap { $0 as? String }
         return Set(asked + (Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []))
@@ -3218,7 +3265,16 @@ enum ExtensionShims {
             let visible = owner.visibleTabs
             return ((first as? [Int]) ?? []).map { index -> Any in
                 guard visible.indices.contains(index) else { return NSNull() }
-                return ["url": visible[index].address?.absoluteString ?? "", "title": visible[index].title]
+                let tab = visible[index]
+                // Another extension's page stays blank, as WebKit keeps it
+                // (see the refusal in Extensions.load); its own are its own.
+                if let url = tab.address, let scheme = url.scheme?.lowercased(),
+                   [Extensions.scheme, Extensions.formerScheme].contains(scheme), url.host() != id {
+                    return ["url": "", "title": ""]
+                }
+                var described: [String: Any] = ["url": tab.address?.absoluteString ?? "", "title": tab.title]
+                if let icon = favIconURL(tab) { described["favIconUrl"] = icon }
+                return described
             }
         case "tabs.move", "tabs.discard", "tabs.activate":
             let visible = owner.visibleTabs

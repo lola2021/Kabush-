@@ -31,6 +31,7 @@ final class Favicons {
         try? FileManager.default.removeItem(at: Favicons.folder)
         missing.removeAll()
         absent.removeAll()
+        if #available(macOS 15.4, *) { ExtensionShims.forgetIcons() }
     }
     private static func file(_ key: String) -> URL { folder.appendingPathComponent(key + ".png") }
 
