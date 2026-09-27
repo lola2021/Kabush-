@@ -237,6 +237,14 @@ final class Preferences: ObservableObject {
             HoveredLink.on = showsLinks
         }
     }
+    /// A back or forward swipe held once armed shows the pages that way to
+    /// pick from (see PageView.openList). Off unless asked for.
+    @Published var holdsHistory: Bool {
+        didSet {
+            store.set(holdsHistory, forKey: "swipe.history")
+            PageView.holdsHistory = holdsHistory
+        }
+    }
     /// Two fingers flick the floating video to a corner (see Float.swift).
     /// On unless turned off.
     @Published var floatFlicks: Bool {
@@ -361,6 +369,9 @@ final class Preferences: ObservableObject {
         usesSpaces = store.bool(forKey: "spaces")
         usesTabGroups = store.bool(forKey: "tabs.groups")
         commandBar = store.bool(forKey: "commandbar")
+        let history = store.bool(forKey: "swipe.history")
+        holdsHistory = history
+        PageView.holdsHistory = history
         // On for everyone who never touched these three switches (Drice,
         // 27 Sep 2026); a choice made before stands.
         let flicks = store.object(forKey: "float.flicks") as? Bool ?? true
