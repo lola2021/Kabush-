@@ -754,16 +754,35 @@ enum ExtensionShims {
       // WebKit hands none of the extension's pages a message its worker or another of its pages sent, and Bitwarden's
       // sync and passkey window wait on those. so each one also goes over the channel, and a page that didn't hear it
       // from WebKit takes it from there.
-      const heardNatively = new Map();
-      let deliverRelayed = null;
+      // Each message's copies are paired by count, keyed on a hash of all of
+      // it: one WebKit delivered cancels one relayed copy still to come, and
+      // one relayed cancels a late one from WebKit. However late, however long.
+      const relayKey = (message) => {
+        try {
+          const text = JSON.stringify(message);
+          if (text === undefined) return null;
+          let hash = 2166136261;
+          for (let i = 0; i < text.length; i++) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+          return (hash >>> 0).toString(36) + ":" + text.length;
+        } catch (e) { return null; }
+      };
+      const heardNatively = new Map(), heardRelayed = new Map();
+      const count = (map, key, by) => {
+        const n = (map.get(key) || 0) + by;
+        if (n > 0) { if (map.size > 200) map.clear(); map.set(key, n); } else map.delete(key);
+      };
+      let deliverRelayed = null, relaying = false;
       const relay = (message) => { if (channel && !inContent) try { channel.postMessage({ relay: message, from: me, url: location.href }); } catch (e) {} };
       if (channel) {
         channel.onmessage = ({ data }) => {
           if (!data || data.from === me) return;
           if (data.relay !== undefined) {
-            const key = keyOf(data.relay);
+            const key = relayKey(data.relay);
             if (!background && deliverRelayed) setTimeout(() => {
-              if (!key || Date.now() - (heardNatively.get(key) || 0) > 1000) deliverRelayed(data.relay, { id: runtime.id, url: data.url, origin: location.origin });
+              if (key && heardNatively.get(key)) { count(heardNatively, key, -1); return; }
+              if (key) count(heardRelayed, key, 1);
+              relaying = true;
+              try { deliverRelayed(data.relay, { id: runtime.id, url: data.url, origin: location.origin }); } finally { relaying = false; }
             }, 50);
             return;
           }
@@ -819,7 +838,11 @@ enum ExtensionShims {
         const listeners = new Set();
         let attached = false;
         const dispatch = function (message, sender, respond) {
-          if (!background) { const k = keyOf(message); if (k) { if (heardNatively.size > 200) heardNatively.clear(); heardNatively.set(k, Date.now()); } }
+          if (!background && !relaying) {
+            const k = relayKey(message);
+            if (k && heardRelayed.get(k)) { count(heardRelayed, k, -1); return; }
+            if (k) count(heardNatively, k, 1);
+          }
           let settled = false, keep = false;
           const sendResponse = (value) => { if (!settled) { settled = true; respond(value); } };
           // Only the worker answers; any other page stays out of it.
