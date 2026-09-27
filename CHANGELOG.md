@@ -43,6 +43,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Passbolt's popup is no longer empty: its background turned the popup away because it came as a tab, where Chrome sends a popup's messages with none; now it comes as Chrome's does. Thanks for the report ([#300](https://github.com/driceroland/Search/issues/300))
 - The Claude extension starts: its background stopped at once on a name Search didn't provide (`chrome.tabGroups.Color`), and the tab its button opens showed nothing, its address escaped. An extension page asked for with a query, a side panel's or an offscreen page's, now keeps it, and is always one of the extension's own.
 - A link's right-click menu says Open Link in New Tab, which is what it does: it said Open Link in New Window, as WebKit names it, and opened a tab. Thanks [@AxxzyWasTaken](https://github.com/AxxzyWasTaken) ([#296](https://github.com/driceroland/Search/pull/296), [#295](https://github.com/driceroland/Search/issues/295))
+- ⌥⌫ in the address field with an ending offered lets go of it and deletes the last word typed, as it does with no ending there; it did nothing at all. Thanks [@merttopuz](https://github.com/merttopuz) ([#244](https://github.com/driceroland/Search/pull/244)), and [@JustinyAhin](https://github.com/JustinyAhin) for the report ([#228](https://github.com/driceroland/Search/issues/228))
 
 ## 1.0.3 — 24 September 2026
 
