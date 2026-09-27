@@ -90,10 +90,6 @@ struct WelcomePanel: View {
                     .foregroundStyle(Palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                // The one picked, or the first: Firefox and Zen have no
-                // passwords to bring yet, so that choice comes and goes with
-                // the browser in front.
-                let current = source ?? sources[0]
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
                         Segmented(
@@ -105,16 +101,14 @@ struct WelcomePanel: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.muted)
                     }
-                    if current.hasPasswords {
-                        Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
-                    }
+                    Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
                     Choice("Bookmarks", "Folders and all, behind the bookmark button", on: $wantsBookmarks)
                     Choice("History", "The last few thousand places, for finishing addresses", on: $wantsHistory)
                 }
 
                 HStack(spacing: 12) {
                     Big(bringing ? "Bringing…" : "Bring them in", filled: true) { bringAll() }
-                        .disabled(bringing || brought != nil || !((current.hasPasswords && wantsPasswords) || wantsHistory || wantsBookmarks))
+                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks))
                     if bringing { Ring(size: 10) }
                     if let brought {
                         Text(brought)
@@ -229,7 +223,7 @@ struct WelcomePanel: View {
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
-        if source.hasPasswords && wantsPasswords {
+        if wantsPasswords {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
                 let outcome = Result { try source.read() }
@@ -247,6 +241,8 @@ struct WelcomePanel: View {
                         lines.append("\(kept) passwords")
                     case .failure(Chromium.Trouble.noPassphrase):
                         lines.append("passwords: macOS didn't hand over the key — allow it and try again")
+                    case .failure(Mozilla.Trouble.primaryPassword):
+                        lines.append("passwords: \(source.name) has a primary password — export them from it and bring in the CSV")
                     case .failure:
                         lines.append("passwords: nothing readable")
                     }

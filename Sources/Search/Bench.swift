@@ -765,7 +765,10 @@ final class Bench {
             }
             if what.contains("passwords") {
                 let outcome = Result { try source.read() }
-                if case .success(let read) = outcome { out["read"] = read.logins.count }
+                switch outcome {
+                case .success(let read): out["read"] = read.logins.count
+                case .failure(let error): out["error"] = "\(error)"
+                }
                 browser.took(outcome, from: source.name)
                 out["saved"] = browser.saved.count
             }

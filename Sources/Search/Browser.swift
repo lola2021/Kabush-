@@ -423,6 +423,8 @@ final class Browser: NSObject, ObservableObject {
             announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(name) didn't give up its keychain key")
+        case .failure(Mozilla.Trouble.primaryPassword):
+            announce("\(name) has a primary password — export your passwords from it (Settings › Passwords › ⋯ › Export) and bring in the CSV file")
         case .failure:
             announce("Nothing readable in \(name)")
         }

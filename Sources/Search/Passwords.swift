@@ -56,8 +56,8 @@ struct PasswordsPanel: View {
                     Text("Bring in from")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
-                    // Only the browsers on this Mac whose passwords can be read.
-                    ForEach(ImportSource.installed().filter(\.hasPasswords)) { source in
+                    // Only the browsers actually on this Mac.
+                    ForEach(ImportSource.installed()) { source in
                         Pill(source.name) {
                             importing = source.name
                             // Off the main thread: four hundred passwords is a

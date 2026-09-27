@@ -471,6 +471,9 @@ enum Mozilla {
 
     enum Trouble: Error {
         case unreadable
+        /// A primary password is set, so the key can't be read here — the
+        /// person is told to export instead.
+        case primaryPassword
     }
 
     // MARK: - what they kept
@@ -674,6 +677,284 @@ enum Mozilla {
         }
         return out
     }
+
+    // MARK: - passwords
+
+    // Firefox keeps its saved logins in logins.json, each field base64 DER
+    // around a ciphertext, and the key that unlocks them wrapped in key4.db.
+    // Most people never set a primary password, and this reads that case: the
+    // empty password is checked against key4.db's own record, the key is
+    // unwrapped, and each login is decrypted. When a primary password is set
+    // the check fails, and rather than ask for it the panel says to export
+    // from Firefox and bring in the CSV. The same Login and disabledHosts a
+    // Chromium browser gives come back, so the keychain path is shared.
+
+    /// The saved logins, and the sites the browser was told never to ask
+    /// about, across every profile on this Mac.
+    static func read(_ source: Source) throws -> Chromium.Found {
+        var logins: [Login] = []
+        var never: [String] = []
+        var seen = Set<String>()
+        var readAny = false
+        var locked = false
+
+        for file in source.files {
+            let profile = file.deletingLastPathComponent()
+            let key4 = profile.appendingPathComponent("key4.db")
+            let store = profile.appendingPathComponent("logins.json")
+            guard FileManager.default.fileExists(atPath: key4.path),
+                  FileManager.default.fileExists(atPath: store.path)
+            else { continue }
+            let key: [UInt8]
+            do { key = try masterKey(in: key4) }
+            catch Trouble.primaryPassword { locked = true; continue }
+            catch { continue }
+            readAny = true
+            guard let data = try? Data(contentsOf: store),
+                  let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            for host in (doc["disabledHosts"] as? [String]) ?? [] {
+                let clean = Vault.host(of: host)
+                if !clean.isEmpty { never.append(clean) }
+            }
+            for entry in (doc["logins"] as? [[String: Any]]) ?? [] {
+                guard let origin = entry["hostname"] as? String else { continue }
+                let host = Vault.host(of: origin)
+                guard !host.isEmpty else { continue }
+                guard let userB64 = entry["encryptedUsername"] as? String,
+                      let passB64 = entry["encryptedPassword"] as? String,
+                      let user = decryptLogin(userB64, master: key),
+                      let password = decryptLogin(passB64, master: key), !password.isEmpty
+                else { continue }
+                let clear = origin.lowercased().hasPrefix("http://")
+                let login = Login(host: host, user: user, password: password, used: nil, clear: clear)
+                guard seen.insert(login.id).inserted else { continue }
+                logins.append(login)
+            }
+        }
+        // The primary-password error is only worth raising when there was
+        // nothing else to bring: a second, open profile still gives its own.
+        if !readAny && locked { throw Trouble.primaryPassword }
+        guard readAny else { throw Trouble.unreadable }
+        return Chromium.Found(logins: logins, never: never)
+    }
+
+    /// The key that unlocks the logins, from key4.db: the empty primary
+    /// password checked against the browser's own record first, then the key
+    /// itself unwrapped from nssPrivate. Throws primaryPassword when the check
+    /// fails, so the caller can say to export rather than ask for one.
+    private static func masterKey(in key4: URL) throws -> [UInt8] {
+        let copy = try Snapshot(of: key4)
+        let temp = copy.file
+        defer { withExtendedLifetime(copy) {} }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_close(db) }
+
+        // The global salt, and the check the empty password has to pass.
+        var globalSalt: [UInt8] = []
+        var item2: [UInt8] = []
+        var meta: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT item1, item2 FROM metaData WHERE id = 'password'", -1, &meta, nil) == SQLITE_OK,
+           sqlite3_step(meta) == SQLITE_ROW {
+            globalSalt = blob(meta, 0)
+            item2 = blob(meta, 1)
+        }
+        sqlite3_finalize(meta)
+        guard !globalSalt.isEmpty, !item2.isEmpty else { throw Trouble.unreadable }
+        let password: [UInt8] = []
+        guard let check = unwrap(item2, globalSalt: globalSalt, password: password),
+              check.starts(with: Array("password-check".utf8))
+        else { throw Trouble.primaryPassword }
+
+        // The wrapped key, in the nssPrivate row NSS marks with a fixed id.
+        let wantedID = [0xf8] + [UInt8](repeating: 0, count: 14) + [0x01]
+        var a11: [UInt8] = []
+        var priv: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT a11, a102 FROM nssPrivate", -1, &priv, nil) == SQLITE_OK {
+            while sqlite3_step(priv) == SQLITE_ROW {
+                if blob(priv, 1) == wantedID { a11 = blob(priv, 0); break }
+            }
+        }
+        sqlite3_finalize(priv)
+        guard !a11.isEmpty, let key = unwrap(a11, globalSalt: globalSalt, password: password) else {
+            throw Trouble.unreadable
+        }
+        return key
+    }
+
+    /// One encrypted login field: base64 around a DER SEQUENCE of the key's
+    /// id, the cipher with its IV, and the ciphertext. Newer profiles use
+    /// AES-256-CBC, older ones 3DES-CBC; the DER says which.
+    private static func decryptLogin(_ b64: String, master: [UInt8]) -> String? {
+        guard let data = Data(base64Encoded: b64) else { return nil }
+        let blob = [UInt8](data)
+        guard let outer = tlv(blob, 0) else { return nil }
+        let parts = items(outer.body)
+        guard parts.count == 3 else { return nil }
+        let cipher = items(parts[1].body)
+        guard cipher.count == 2 else { return nil }
+        let iv = cipher[1].body
+        let ct = parts[2].body
+        let plain: [UInt8]?
+        if oid(cipher[0].body) == "2.16.840.1.101.3.4.1.42" {
+            let realIV = iv.count == 14 ? [0x04, 0x0e] + iv : iv
+            plain = decryptCBC(ct, algorithm: kCCAlgorithmAES128, key: master, iv: realIV, blockSize: kCCBlockSizeAES128)
+        } else {
+            plain = decryptCBC(ct, algorithm: kCCAlgorithm3DES, key: Array(master.prefix(24)), iv: iv, blockSize: kCCBlockSize3DES)
+        }
+        return plain.flatMap { String(bytes: $0, encoding: .utf8) }
+    }
+
+    /// A key4.db entry — the check or the wrapped key — unwrapped with the
+    /// empty password. Two ways it can be protected: PBES2 (PBKDF2-HMAC-SHA256
+    /// then AES-256-CBC) in current Firefox, and PBE-SHA1-3DES before that.
+    /// The DER around the ciphertext says which and carries the salts.
+    private static func unwrap(_ blob: [UInt8], globalSalt: [UInt8], password: [UInt8]) -> [UInt8]? {
+        guard let outer = tlv(blob, 0) else { return nil }
+        let top = items(outer.body)
+        guard top.count == 2 else { return nil }
+        let algo = items(top[0].body)
+        guard let algoOid = algo.first.map({ oid($0.body) }), algo.count == 2 else { return nil }
+        let ciphertext = top[1].body
+
+        if algoOid == "1.2.840.113549.1.5.13" {
+            // PBES2. NSS feeds PBKDF2 the SHA-256 of the salt and the
+            // password, and the real IV is the fourteen bytes it kept behind a
+            // DER octet-string header.
+            let params = items(algo[1].body)
+            guard params.count == 2 else { return nil }
+            let kdf = items(params[0].body)
+            guard kdf.count == 2 else { return nil }
+            let kp = items(kdf[1].body)
+            guard kp.count >= 2 else { return nil }
+            let entrySalt = kp[0].body
+            let rounds = integer(kp[1].body)
+            let enc = items(params[1].body)
+            guard enc.count == 2 else { return nil }
+            let ck = sha256(globalSalt + password)
+            guard let key = pbkdf2SHA256(ck, salt: entrySalt, rounds: rounds, length: 32) else { return nil }
+            let iv = [0x04, 0x0e] + enc[1].body
+            return decryptCBC(ciphertext, algorithm: kCCAlgorithmAES128, key: key, iv: iv, blockSize: kCCBlockSizeAES128)
+        }
+        if algoOid == "1.2.840.113549.1.12.5.1.3" {
+            // PBE-SHA1-3DES. A chain of SHA-1 and HMAC-SHA-1 over the salts
+            // ends in the 3DES key and its IV.
+            let params = items(algo[1].body)
+            guard let entrySalt = params.first?.body else { return nil }
+            let hp = sha1(globalSalt + password)
+            let chp = sha1(hp + entrySalt)
+            var pes = entrySalt
+            if pes.count < 20 { pes += [UInt8](repeating: 0, count: 20 - pes.count) } else { pes = Array(pes.prefix(20)) }
+            let k1 = hmacSHA1(chp, pes + entrySalt)
+            let tk = hmacSHA1(chp, pes)
+            let k2 = hmacSHA1(chp, tk + entrySalt)
+            let k = k1 + k2
+            return decryptCBC(ciphertext, algorithm: kCCAlgorithm3DES, key: Array(k.prefix(24)), iv: Array(k.suffix(8)), blockSize: kCCBlockSize3DES)
+        }
+        return nil
+    }
+
+    // MARK: - the little that reads DER, and CommonCrypto
+
+    /// One DER element at an offset: its tag, its content, and where the next
+    /// begins. Enough to walk NSS's key and login structures, no more.
+    private static func tlv(_ b: [UInt8], _ i: Int) -> (tag: UInt8, body: [UInt8], next: Int)? {
+        guard i + 1 < b.count else { return nil }
+        let tag = b[i]
+        var j = i + 1
+        var len = Int(b[j]); j += 1
+        if len & 0x80 != 0 {
+            let n = len & 0x7f
+            guard n > 0, j + n <= b.count else { return nil }
+            len = 0
+            for _ in 0..<n { len = (len << 8) | Int(b[j]); j += 1 }
+        }
+        guard len >= 0, j + len <= b.count else { return nil }
+        return (tag, Array(b[j..<j + len]), j + len)
+    }
+
+    /// The elements of a constructed value, in order.
+    private static func items(_ body: [UInt8]) -> [(tag: UInt8, body: [UInt8])] {
+        var out: [(UInt8, [UInt8])] = []
+        var i = 0
+        while let one = tlv(body, i) { out.append((one.tag, one.body)); i = one.next }
+        return out
+    }
+
+    /// An object identifier as its dotted string.
+    private static func oid(_ body: [UInt8]) -> String {
+        guard let first = body.first else { return "" }
+        var parts = [Int(first) / 40, Int(first) % 40]
+        var value = 0
+        for byte in body.dropFirst() {
+            value = (value << 7) | Int(byte & 0x7f)
+            if byte & 0x80 == 0 { parts.append(value); value = 0 }
+        }
+        return parts.map(String.init).joined(separator: ".")
+    }
+
+    /// An unsigned integer, as key4.db's are small.
+    private static func integer(_ body: [UInt8]) -> Int {
+        body.reduce(0) { ($0 << 8) | Int($1) }
+    }
+
+    private static func sha256(_ b: [UInt8]) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256(b, CC_LONG(b.count), &out)
+        return out
+    }
+
+    private static func sha1(_ b: [UInt8]) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+        CC_SHA1(b, CC_LONG(b.count), &out)
+        return out
+    }
+
+    private static func hmacSHA1(_ key: [UInt8], _ message: [UInt8]) -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: Int(CC_SHA1_DIGEST_LENGTH))
+        CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA1), key, key.count, message, message.count, &out)
+        return out
+    }
+
+    private static func pbkdf2SHA256(_ pass: [UInt8], salt: [UInt8], rounds: Int, length: Int) -> [UInt8]? {
+        var out = [UInt8](repeating: 0, count: length)
+        let status = pass.withUnsafeBufferPointer { p in
+            salt.withUnsafeBufferPointer { s in
+                CCKeyDerivationPBKDF(
+                    CCPBKDFAlgorithm(kCCPBKDF2),
+                    UnsafeRawPointer(p.baseAddress!).assumingMemoryBound(to: Int8.self), pass.count,
+                    s.baseAddress!, salt.count,
+                    CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), UInt32(rounds),
+                    &out, length
+                )
+            }
+        }
+        return status == kCCSuccess ? out : nil
+    }
+
+    /// CBC decryption with PKCS#7 padding stripped, for AES-256 or 3DES.
+    private static func decryptCBC(_ data: [UInt8], algorithm: Int, key: [UInt8], iv: [UInt8], blockSize: Int) -> [UInt8]? {
+        guard !data.isEmpty else { return nil }
+        var out = [UInt8](repeating: 0, count: data.count + blockSize)
+        var moved = 0
+        let status = CCCrypt(
+            CCOperation(kCCDecrypt), CCAlgorithm(algorithm), CCOptions(kCCOptionPKCS7Padding),
+            key, key.count, iv,
+            data, data.count,
+            &out, out.count, &moved
+        )
+        guard status == kCCSuccess else { return nil }
+        return Array(out.prefix(moved))
+    }
+
+    private static func blob(_ statement: OpaquePointer?, _ column: Int32) -> [UInt8] {
+        guard let bytes = sqlite3_column_blob(statement, column) else { return [] }
+        return [UInt8](Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, column))))
+    }
 }
 
 /// One browser to bring things over from, whichever family it belongs to, so
@@ -695,15 +976,6 @@ enum ImportSource: Identifiable, Hashable {
         switch self {
         case .chromium(let s): return s.name
         case .mozilla(let s): return s.name
-        }
-    }
-
-    /// Whether its saved passwords can be read here. Firefox's arrive in a
-    /// later change; for now only Chromium's do.
-    var hasPasswords: Bool {
-        switch self {
-        case .chromium: return true
-        case .mozilla: return false
         }
     }
 
@@ -731,7 +1003,7 @@ enum ImportSource: Identifiable, Hashable {
     func read() throws -> Chromium.Found {
         switch self {
         case .chromium(let s): return try Chromium.read(s)
-        case .mozilla: throw Chromium.Trouble.unreadable
+        case .mozilla(let s): return try Mozilla.read(s)
         }
     }
 
