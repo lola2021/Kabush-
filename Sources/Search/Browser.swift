@@ -2530,8 +2530,17 @@ final class Browser: NSObject, ObservableObject {
                 )
             }
         }
+        // First, not last: typing "settings" to reach Settings is the whole
+        // point, and it would otherwise sit under a search for the word.
+        let command = prefs.commandBar ? AddressCommand.matching(typed, in: self) : nil
+        if let command { list.insert(.command(command), at: 0) }
         offers = list
-        ending = history.completion(for: typed, among: offers.filter { $0.kind != .open })
+        // Neither a page already open nor a command has an address to
+        // complete towards. And with a command on top, Return runs it: a
+        // grey ending in the field ("history" finishing as history.com)
+        // would promise a place Return doesn't go to.
+        ending = command != nil ? nil
+            : history.completion(for: typed, among: offers.filter { $0.kind != .open && !$0.kind.isCommand })
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
@@ -2569,7 +2578,9 @@ final class Browser: NSObject, ObservableObject {
     /// resting cursor would otherwise rewrite the field before you had moved.
     func take(_ offer: Suggestion) {
         summoning = false
-        if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
+        if case .command(let command) = offer.kind {
+            command.run(on: self)
+        } else if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
             select(tab)
         } else {
             (active ?? tabs.first)?.go(to: offer.url)
@@ -2647,6 +2658,18 @@ final class Browser: NSObject, ObservableObject {
                 editing = false
                 return
             }
+        }
+
+        // The row the arrow keys chose, or else the top one: a command is
+        // only ever on top, and there it is what Return does. Walked past,
+        // Return goes where it always went.
+        let chosen = (picked.flatMap { offers.indices.contains($0) ? offers[$0] : nil }) ?? offers.first
+        if case .command(let command) = chosen?.kind {
+            command.run(on: self)
+            editing = false
+            typed = ""
+            picked = nil
+            return
         }
 
         let target: URL?

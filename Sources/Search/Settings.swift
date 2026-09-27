@@ -290,6 +290,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.littleLinks)
             }
             Rule()
+            Line("Address bar commands", "A word like \"settings\" or \"new tab\", typed alone in the address field, goes there instead of searching for it") {
+                Switch(on: $prefs.commandBar)
+            }
+            Rule()
             Line("Show where links go", "Point at a link and its address shows at the bottom of the page") {
                 Switch(on: $prefs.showsLinks)
             }
