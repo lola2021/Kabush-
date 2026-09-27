@@ -35,10 +35,6 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
   security report sent privately never comes here, not even in outline: it
   is fixed, it ships, and only then is it credited in CHANGELOG.md.
 
-## Being built now
-
-- [ ] **Unpinning leaves an empty tile** Unpinning an open tab left an empty grey tile where the pin was, and the tab went missing from the list. *(X)*
-
 ## Done, in the next version
 
 - [x] **Bitwarden goes blank after sign-in** For one person it doesn't load at all. Before signing in it works — popup, WebAssembly, background. Probably fixed by 1Password's worker fix ([#126](https://github.com/driceroland/Search/pull/126)) and the extension storage fix in 1.0.2; needs a real account to confirm. Also asked: a self-hosted Vaultwarden server behind the extension. *(X, email ×2, [#343](https://github.com/driceroland/Search/pull/343))*
