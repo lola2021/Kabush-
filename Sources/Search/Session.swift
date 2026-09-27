@@ -13,11 +13,15 @@ enum Session {
         var name: String?
         /// A pin's own page, the one it was pinned at (see Browser.goHome).
         var home: String?
+        /// The sidebar group this ordinary tab belongs to, if any.
+        var groupID: UUID? = nil
     }
 
     struct Shape: Codable {
         var tabs: [Entry]
         var active: Int
+        /// Nil in sessions written before tab groups existed.
+        var groups: [TabGroup]? = nil
     }
 
     /// The first space's is the session there always was; each other space
