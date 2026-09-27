@@ -239,6 +239,29 @@ final class Bookmarks: ObservableObject {
         return node
     }
 
+    /// A folder of your own, its name asked for as a rename's is: inside
+    /// `parent`, or at the top level for nil. An empty name makes none.
+    func askNewFolder(in parent: Bookmark.ID?, made: @escaping (Bookmark.ID) -> Void = { _ in }) {
+        Ask.name("New Folder", placeholder: "Folder name", confirm: "Make") { name in
+            made(self.insert(.folder(name, []), into: parent).id)
+        }
+    }
+
+    /// A folder with bookmarks in it asks first: they all go with it, and
+    /// there is no taking it back. Anything else goes at once.
+    func askRemove(_ node: Bookmark) {
+        guard node.isFolder, let kids = node.children, !kids.isEmpty else { return remove(node.id) }
+        let count = Bookmarks.count(kids)
+        let detail = switch count {
+        case 0: "The empty folders in it go too."
+        case 1: "The bookmark in it goes too."
+        default: "The \(count) bookmarks in it go too."
+        }
+        Ask.sure("Remove \u{201C}\(node.title)\u{201D}?", detail: detail, confirm: "Remove") {
+            self.remove(node.id)
+        }
+    }
+
     /// A new title or address for one that is kept. chrome.bookmarks.update,
     /// and Rename… in the list's right-click menu.
     func update(_ id: Bookmark.ID, title: String?, url: String?) {
@@ -319,7 +342,10 @@ struct BookmarkOutline: View {
                 moveTargets: Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) },
                 moveTo: { bookmarks.move(node.id, into: $0) },
                 rename: { rename(node) },
-                remove: { bookmarks.remove(node.id) }
+                newFolder: node.isFolder ? {
+                    bookmarks.askNewFolder(in: node.id) { _ in expanded.insert(node.id) }
+                } : nil,
+                remove: { bookmarks.askRemove(node) }
             )
             .overlay {
                 if let url = node.url.flatMap(URL.init(string:)) {
@@ -406,6 +432,8 @@ struct BookmarkOutline: View {
         let moveTargets: [(node: Bookmark, depth: Int)]
         let moveTo: (Bookmark.ID?) -> Void
         let rename: () -> Void
+        /// A folder in this one: only on a folder.
+        let newFolder: (() -> Void)?
         let remove: () -> Void
 
         @State private var hovering = false
@@ -453,6 +481,9 @@ struct BookmarkOutline: View {
                     Divider()
                 }
                 Button("Rename…", action: rename)
+                if let newFolder {
+                    Button("New Folder Inside…", action: newFolder)
+                }
                 Menu("Move to") {
                     Button("Top Level", action: { moveTo(nil) })
                     if !moveTargets.isEmpty {
@@ -576,6 +607,7 @@ struct BookmarksPanel: View {
                 }
                 Pill("File…") { browser.importFile() }
                 Spacer()
+                Pill("New Folder…") { bookmarks.askNewFolder(in: nil) }
                 Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
