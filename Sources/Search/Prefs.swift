@@ -91,6 +91,15 @@ final class Preferences: ObservableObject {
     @Published var shielded: Bool {
         didSet { store.set(shielded, forKey: "shield") }
     }
+    /// Settings › Privacy › Prevent cross-site tracking, turned off: WebKit's
+    /// tracking prevention off, as Safari's same switch does (see
+    /// Store.keepsSignIns). On unless turned off.
+    @Published var keepsSignIns: Bool {
+        didSet {
+            store.set(keepsSignIns, forKey: "sites.keep")
+            Store.keepsSignIns = keepsSignIns
+        }
+    }
     /// A private tab gets extensions too, not just every other page. Off
     /// unless asked for - a private tab keeps nothing by default, extensions
     /// included, and some watch what a page does.
@@ -275,6 +284,10 @@ final class Preferences: ObservableObject {
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         mruSwitcher = store.bool(forKey: "tabs.mru")
         shielded = store.object(forKey: "shield") as? Bool ?? true
+        let keeps = store.bool(forKey: "sites.keep")
+        keepsSignIns = keeps
+        // Before the first page is loaded into the store.
+        Store.keepsSignIns = keeps
         extensionsInPrivate = store.bool(forKey: "extensions.private")
         // Offered by default only in a build that can actually do them —
         // one with Apple's browser entitlement and its profile embedded. A
