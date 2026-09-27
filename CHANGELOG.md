@@ -32,6 +32,9 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- The tabs saved at quit are the ones that come back: saves of the session, the bookmarks and the downloads list could reach the disk out of order, and an older one land after the last. They are now written one at a time, newest last.
+- Quitting on a private or blank tab brings back the tab kept just before it, not the first of the row.
+- A page still loading when you go to another space goes into History and gets its icon when it finishes.
 - ⌘K always opens Search's list of open pages, on every page, pinned ones included. Since pages got their shortcuts first, Slack, X, GitHub and ChatGPT kept it for their own search. ([#238](https://github.com/driceroland/Search/issues/238))
 - An extension talking to an app on the Mac finds a host registered with Vivaldi or with Opera: both keep their `NativeMessagingHosts` folder where Chrome, Chromium, Edge, Brave and Arc keep theirs, and Search reads them all now. The two were already browsers it brings passwords and bookmarks in from, so the folders it reads name the same browsers the import list does. Thanks [@gabrielemeksiz-ui](https://github.com/gabrielemeksiz-ui) ([#302](https://github.com/driceroland/Search/pull/302))
 - A tab's × closes it in the tab bar folded away with ⌘S and brought back over the page, where the × showed under the pointer and a click on it did nothing.

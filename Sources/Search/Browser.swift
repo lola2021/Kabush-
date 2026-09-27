@@ -807,7 +807,7 @@ final class Browser: NSObject, ObservableObject {
         // the one that happened to ask for it.
         Favicons.shared.arrived = { [weak self] host, image in
             guard let self else { return }
-            for tab in tabs where tab.address?.host()?.lowercased() == host {
+            for tab in tabs + parkedTabs where tab.address?.host()?.lowercased() == host {
                 tab.icon = image
             }
         }
@@ -1057,16 +1057,23 @@ final class Browser: NSObject, ObservableObject {
         var entries: [Session.Entry] = []
         var active = 0
         for tab in tabs {
-            guard !tab.shy, !tab.bench,
-                  // A sleeping view is blank, so `pending` must win or its
-                  // page will disappear from the next session.
-                  let url = tab.pending ?? tab.address,
-                  url.scheme?.hasPrefix("http") == true
-            else { continue }
+            guard kept(tab), let url = tab.pending ?? tab.address else { continue }
             if tab.id == id { active = entries.count }
             entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name))
         }
+        // The tab you were on isn't kept — a private or blank one: the one
+        // kept just before it comes back in front, not the first of the row.
+        if let id, let at = tabs.firstIndex(where: { $0.id == id }), !kept(tabs[at]) {
+            active = max(0, tabs[..<at].filter(kept).count - 1)
+        }
         return .init(tabs: entries, active: active)
+    }
+
+    /// Whether a tab goes into the session: not a private one or the
+    /// bench's, and only with a web address. A sleeping view is blank, so
+    /// `pending` must win or its page will disappear from the next session.
+    private func kept(_ tab: Tab) -> Bool {
+        !tab.shy && !tab.bench && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
     private func writeSession(now: Bool, space: UUID, row: Parked) {
@@ -2411,7 +2418,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // A page with nothing to lay out never has a first frame. Done is
         // done, and it is shown.
         (webView as? PageView)?.showFirstFrame()
-        guard let tab = tab(for: webView), let url = tab.address else { return }
+        guard let tab = anyTab(for: webView), let url = tab.address else { return }
         tab.uncover()
         tellStore(tab)
         // A page that arrived after a password went out: did the sign-in take?
@@ -2459,6 +2466,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func tab(for webView: WKWebView) -> Tab? {
         tabs.first { $0.built === webView }
+    }
+
+    /// The tab a page belongs to, in the space on screen or another: a page
+    /// still loading when you went to another space finishes there, and
+    /// still goes into History with its icon.
+    func anyTab(for webView: WKWebView) -> Tab? {
+        tab(for: webView) ?? parkedTabs.first { $0.built === webView }
     }
 }
 
