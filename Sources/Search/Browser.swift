@@ -748,6 +748,8 @@ final class Browser: NSObject, ObservableObject {
     /// alert(), confirm() and prompt() from tabs that weren't in front,
     /// waiting for them to be (see Dialogs.swift).
     var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
+    /// What handOff decided, in a test run, for the bench.
+    static var handedOff: [String] = []
     /// Downloads from private tabs, which the Downloads list never shows.
     var unlisted: Set<ObjectIdentifier> = []
     /// The Chrome Web Store's pages, told when installs come and go. See StoreRelay.swift.
@@ -2087,15 +2089,33 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         webView.stopLoading()
     }
 
-    /// An address for another app — mail, a call, a meeting. Only the page
-    /// itself may ask, or a click inside one of its frames; a frame that
+    /// An address for another app — mail, a call, a meeting. The page itself
+    /// may ask, or a frame of the page's own site — Zoom's, Teams' and
+    /// Slack's "open the app" pages load it into a frame of their own from a
+    /// script — or a click inside any frame. A frame from another site that
     /// asks on its own (an advertisement, say) is ignored. And the other app
     /// opens only once you have said so, as in Safari — except a mail or
     /// phone link you just clicked on, which is exactly what it says.
     private func handOff(_ url: URL, scheme: String, action: WKNavigationAction, from webView: WKWebView) {
         let clicked = action.navigationType == .linkActivated
-        guard action.targetFrame?.isMainFrame ?? true || clicked else { return }
-        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else { return }
+        let source: WKFrameInfo? = action.sourceFrame
+        let top = webView.url?.host()?.lowercased() ?? ""
+        let asker = source?.securityOrigin.host.lowercased() ?? ""
+        let ownSite = source?.isMainFrame == true
+            || (!top.isEmpty && !asker.isEmpty && Vault.registrable(asker) == Vault.registrable(top))
+        guard action.targetFrame?.isMainFrame ?? true || clicked || ownSite else {
+            if Store.testing { Browser.handedOff.append("\(scheme): ignored") }
+            return
+        }
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+            if Store.testing { Browser.handedOff.append("\(scheme): no app") }
+            return
+        }
+        // A test run can't show the question (see Dialogs): it says it would.
+        if Store.testing {
+            Browser.handedOff.append("\(scheme): asked")
+            return
+        }
         if clicked, ["mailto", "tel"].contains(scheme) {
             NSWorkspace.shared.open(url)
             return

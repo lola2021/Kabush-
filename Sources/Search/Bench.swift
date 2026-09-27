@@ -496,6 +496,7 @@ final class Bench {
             default: out["passkeyAccess"] = "notDetermined"
             }
             out["passkeyAsks"] = Passkeys.asked
+            out["handedOff"] = Browser.handedOff
             out["passkeyLast"] = Passkeys.last
             answer(out)
 
