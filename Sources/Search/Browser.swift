@@ -110,6 +110,9 @@ final class Browser: NSObject, ObservableObject {
     /// The "Bring things over" sheet, open while set: the browser it
     /// starts on by name, or "" for the first one found.
     @Published var bringingIn: String?
+    /// The sheet opened from Settings › Extensions: only the extensions
+    /// ticked, on a browser that has some. Read once as it opens.
+    var bringingExtensions = false
 
     /// ⇧⌘S. The same tabs, down the left or across the top.
     func toggleSidebar() {
