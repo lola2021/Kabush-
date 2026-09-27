@@ -27,11 +27,12 @@ final class ScriptTab: NSObject {
     }
 
     /// The page that is on screen, not an address typed, loading or held.
-    /// Never a password written into the address (user:password@).
+    /// Never a name or password written into the address (user:password@).
     @objc var url: String {
         guard let page = tab.pageAddress else { return "" }
-        guard var parts = URLComponents(url: page, resolvingAgainstBaseURL: false), parts.password != nil
+        guard var parts = URLComponents(url: page, resolvingAgainstBaseURL: false), parts.user != nil || parts.password != nil
         else { return page.absoluteString }
+        parts.user = nil
         parts.password = nil
         return parts.url?.absoluteString ?? ""
     }

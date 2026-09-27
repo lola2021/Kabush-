@@ -224,25 +224,67 @@ final class Bookmarks: ObservableObject {
     /// how many were already here.
     @discardableResult
     func take(_ nodes: [Bookmark], from name: String) -> (added: Int, already: Int) {
-        guard !nodes.isEmpty else { return (0, 0) }
+        let taken = takeNoting(nodes, from: name)
+        return (taken.added, taken.already)
+    }
+
+    /// The same, and which bookmarks and folders it added — every one, so
+    /// they can be taken back out exactly (see ImportRecord).
+    func takeNoting(_ nodes: [Bookmark], from name: String) -> (added: Int, already: Int, ids: [Bookmark.ID]) {
+        guard !nodes.isEmpty else { return (0, 0, []) }
         var added = 0, already = 0
+        var ids: [Bookmark.ID] = []
         if roots.isEmpty {
             roots = nodes
             added = Bookmarks.count(nodes)
+            ids = Bookmarks.ids(nodes)
             Store.settings.set(name, forKey: Bookmarks.topKey)
         } else if intoTop(nodes, from: name) {
-            Bookmarks.merge(nodes, into: &roots, added: &added, already: &already)
+            Bookmarks.merge(nodes, into: &roots, added: &added, already: &already, ids: &ids)
         } else {
             var kids = roots.first { $0.isFolder && $0.title == name }?.children ?? []
-            Bookmarks.merge(nodes, into: &kids, added: &added, already: &already)
+            Bookmarks.merge(nodes, into: &kids, added: &added, already: &already, ids: &ids)
             if let at = roots.firstIndex(where: { $0.isFolder && $0.title == name }) {
                 roots[at].children = kids
             } else {
-                roots.append(.folder(name, kids))
+                let folder = Bookmark.folder(name, kids)
+                ids.append(folder.id)
+                roots.append(folder)
             }
         }
         save()
-        return (added, already)
+        return (added, already, ids)
+    }
+
+    /// Takes back out what an import added: every bookmark among `ids`
+    /// wherever it now sits, then every folder among them left empty. A
+    /// folder of theirs that you have put something of your own in stays,
+    /// with that in it. Returns how many bookmarks went.
+    @discardableResult
+    func withdraw(_ ids: [Bookmark.ID]) -> Int {
+        let ours = Set(ids)
+        var gone = 0
+        func strip(_ nodes: [Bookmark]) -> [Bookmark] {
+            nodes.compactMap { node in
+                if !node.isFolder, ours.contains(node.id) {
+                    gone += 1
+                    return nil
+                }
+                guard let kids = node.children else { return node }
+                var copy = node
+                copy.children = strip(kids)
+                if ours.contains(node.id), copy.children?.isEmpty == true { return nil }
+                return copy
+            }
+        }
+        roots = strip(roots)
+        save()
+        return gone
+    }
+
+    /// Every id in a tree, folders and all.
+    private static func ids(_ nodes: [Bookmark]) -> [Bookmark.ID] {
+        nodes.flatMap { [$0.id] + ids($0.children ?? []) }
     }
 
     /// Which browser filled the empty top level, the first time.
@@ -265,22 +307,24 @@ final class Bookmarks: ObservableObject {
     /// `incoming` into `nodes`, level by level: a folder into the folder of
     /// the same name, a page only if the same address isn't already at
     /// that level.
-    private static func merge(_ incoming: [Bookmark], into nodes: inout [Bookmark], added: inout Int, already: inout Int) {
+    private static func merge(_ incoming: [Bookmark], into nodes: inout [Bookmark], added: inout Int, already: inout Int, ids: inout [Bookmark.ID]) {
         for node in incoming {
             if node.isFolder {
                 if let at = nodes.firstIndex(where: { $0.isFolder && $0.title == node.title }) {
                     var kids = nodes[at].children ?? []
-                    merge(node.children ?? [], into: &kids, added: &added, already: &already)
+                    merge(node.children ?? [], into: &kids, added: &added, already: &already, ids: &ids)
                     nodes[at].children = kids
                 } else {
                     nodes.append(node)
                     added += count([node])
+                    ids += Bookmarks.ids([node])
                 }
             } else if nodes.contains(where: { !$0.isFolder && $0.url == node.url }) {
                 already += 1
             } else {
                 nodes.append(node)
                 added += 1
+                ids.append(node.id)
             }
         }
     }
