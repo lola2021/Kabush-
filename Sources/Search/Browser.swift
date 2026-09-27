@@ -1211,8 +1211,12 @@ final class Browser: NSObject, ObservableObject {
         !tab.shy && !tab.bench && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
+    /// Another space's row. Its groups are the ones in its own file, the
+    /// only place a space off screen keeps them: written without them, the
+    /// space would lose every group it had.
     private func writeSession(now: Bool, space: UUID, row: Parked) {
-        Session.write(now: now, space: space, session(row.tabs, active: row.active))
+        let groups = Session.read(space: space).groups
+        Session.write(now: now, space: space, session(row.tabs, active: row.active, groups: groups))
     }
 
     private func rememberSession() {
@@ -1511,6 +1515,8 @@ final class Browser: NSObject, ObservableObject {
         if tabs.isEmpty { adopt(Tab(configuration: Web.configuration(space: spaceID))) }
 
         tab.rehome(in: id)
+        // Its group stays behind: the space it goes to has groups of its own.
+        tab.groupID = nil
         var row = parked[id] ?? loadRow(id)
         let place = tab.pin == nil ? row.tabs.count : (row.tabs.firstIndex { $0.pin == nil } ?? row.tabs.count)
         row.tabs.insert(tab, at: place)
