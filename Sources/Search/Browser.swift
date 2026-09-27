@@ -480,6 +480,8 @@ final class Browser: NSObject, ObservableObject {
 
     func clearHistory() {
         history.forget()
+        // The sites' icons are a list of where you have been, too.
+        Favicons.shared.forgetAll()
         announce("History cleared")
     }
 
@@ -509,7 +511,7 @@ final class Browser: NSObject, ObservableObject {
     private func answerCapture(_ decision: WKPermissionDecision) {
         guard let decide else { return }
         // Remembered per site, so a call you take every week asks once.
-        Store.settings.set(decision == .grant, forKey: "capture." + askedAbout)
+        if !askedAbout.isEmpty { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
         decide(decision)
         self.decide = nil
         askedAbout = ""
@@ -2120,9 +2122,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping (WKPermissionDecision) -> Void
     ) {
         let host = origin.host.isEmpty ? (tab(for: webView)?.address?.host() ?? "This page") : origin.host
-        let key = "\(host)|\(type.rawValue)"
+        // Remembered for the origin that asked — http://site and
+        // https://site, or another port, are other sites — and never for a
+        // private tab, which leaves nothing behind.
+        let site = origin.host.isEmpty ? host : "\(origin.protocol)://\(origin.host)" + (origin.port == 0 ? "" : ":\(origin.port)")
+        let key = "\(site)|\(type.rawValue)"
+        let shy = tab(for: webView)?.shy ?? false
 
-        if let remembered = Store.settings.object(forKey: "capture." + key) as? Bool {
+        if !shy, let remembered = Store.settings.object(forKey: "capture." + key) as? Bool {
             decisionHandler(remembered ? .grant : .deny)
             return
         }
@@ -2134,7 +2141,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         }
 
         decide = decisionHandler
-        askedAbout = key
+        askedAbout = shy ? "" : key
         asking = CaptureAsk(host: host, wants: Browser.name(for: type))
     }
 
