@@ -1080,34 +1080,12 @@ final class Bench {
             }
             settled(0)
         case "visible":
-            // A tab in a probe that nobody sees counts as seen: WebKit keeps
-            // back what waits for the page to be looked at — a page asking
-            // where you are, among others — and a hidden window is never
-            // looked at. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "visible only works on a --test run"]); return }
-            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
-            // Lent, for the rest of the run, to a borderless window off every
-            // screen that isn't hidden with the app (as `film` does), and told
-            // to count as seen there.
-            let lookout = NSWindow(contentRect: NSRect(x: -20000, y: -24000, width: 1024, height: 700),
-                                   styleMask: [.borderless], backing: .buffered, defer: false)
-            lookout.isReleasedWhenClosed = false
-            lookout.isExcludedFromWindowsMenu = true
-            lookout.collectionBehavior = [.transient, .ignoresCycle, .stationary]
-            lookout.hasShadow = false
-            lookout.canHide = false
-            lookout.orderBack(nil)
-            let web = tab.web
-            web.removeFromSuperview()
-            web.frame = NSRect(x: 0, y: 0, width: 1024, height: 700)
-            lookout.contentView?.addSubview(web)
-            lookouts.append(lookout)
-            let occlusion = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
-            if web.responds(to: occlusion) {
-                typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
-                unsafeBitCast(web.method(for: occlusion), to: Setter.self)(web, occlusion, false)
-            }
-            answer(["ok": true])
+            // Refused: it lent the tab to a window of its own, off every
+            // screen, so that WebKit would count the page as seen. No bench
+            // verb makes a window for now, off screen or not, after windows
+            // reached a screen during test runs; what needs a page to be
+            // seen is checked on a release candidate instead.
+            answer(["error": "visible is switched off: it made a window, and no bench verb makes one for now — check this on a release candidate"])
 
         case "answer":
             // The card of a page asking for the camera, microphone or your
@@ -2259,9 +2237,6 @@ final class Bench {
         tab.web.autoresizingMask = [.width, .height]
         window.contentView?.addSubview(tab.web)
     }
-
-    /// The windows off every screen that `visible` lent tabs to.
-    private var lookouts: [NSWindow] = []
 
     private func makeRoom() -> NSWindow {
         // Off every screen, and never key or main: it exists so that a web
