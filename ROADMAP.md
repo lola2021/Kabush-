@@ -35,6 +35,11 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
   security report sent privately never comes here, not even in outline: it
   is fixed, it ships, and only then is it credited in CHANGELOG.md.
 
+## Being built now
+
+- [ ] **Import an .html bookmarks file** Bookmarks from an .html file, passwords from a .csv, and Safari's own export (File › Export Browsing Data): ready, lands after 1.0.4. *(email ×2)*
+- [ ] **Import from Helium, Firefox, Zen** Helium is in the next version. Firefox and Zen — bookmarks, history and passwords — are ready and land after 1.0.4. *([#178](https://github.com/driceroland/Search/pull/178), [#215](https://github.com/driceroland/Search/pull/215))*
+
 ## Done, in the next version
 
 - [x] **Bitwarden goes blank after sign-in** For one person it doesn't load at all. Before signing in it works — popup, WebAssembly, background. Probably fixed by 1Password's worker fix ([#126](https://github.com/driceroland/Search/pull/126)) and the extension storage fix in 1.0.2; needs a real account to confirm. Also asked: a self-hosted Vaultwarden server behind the extension. *(X, email, [#343](https://github.com/driceroland/Search/pull/343))*
@@ -107,8 +112,6 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 
 ## Next — small additions people asked for
 
-- [ ] **Import an .html bookmarks file** The format every browser exports. Only direct import from Chrome, Arc, Brave, Edge and Dia exists today. *(email ×2)*
-- [ ] **Import from Helium, Firefox, Zen** Helium is in the next version (#178). Firefox and Zen, bookmarks, history and passwords, are being brought onto the new import (#215). *([#178](https://github.com/driceroland/Search/pull/178), [#215](https://github.com/driceroland/Search/pull/215))*
 - [ ] **Tab switcher with previews** ⌃Tab held down shows the tabs with previews. Off until turned on; Option-Tab asked too, as in AltTab. Waiting on its author to rebase and simplify. *([#24](https://github.com/driceroland/Search/pull/24), X, email, [#260](https://github.com/driceroland/Search/pull/260), [#358](https://github.com/driceroland/Search/pull/358))*
 - [ ] **Your own keyboard shortcuts** In Settings › Shortcuts. Waiting on its author to rebase and simplify. Editing extension shortcuts belongs with it ([#189](https://github.com/driceroland/Search/issues/189)). *([#36](https://github.com/driceroland/Search/pull/36), [#189](https://github.com/driceroland/Search/issues/189), X)*
 - [ ] **Site search keywords** Type a site's keyword, then your search. *([#188](https://github.com/driceroland/Search/pull/188))*
