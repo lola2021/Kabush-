@@ -1037,6 +1037,7 @@ final class Bench {
             answer(["delegate": wrapped, "before": before, "after": menu.items.count, "ours": BookmarkMenu.shared.count, "fillMs": filled,
                     "titles": menu.items.prefix(8).map { $0.isSeparatorItem ? "—" : $0.title },
                     "firstFolder": folder?.items.prefix(4).map(\.title) ?? [],
+                    "firstFolderImages": folder?.items.prefix(4).map { $0.image != nil } ?? [],
                     "active": browser.active?.address?.absoluteString ?? ""])
 
         case "keyeq":
