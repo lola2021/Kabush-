@@ -828,7 +828,7 @@ struct TabMenu: View {
         }
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }
-                .disabled(tab.isBlank)
+                .disabled(tab.isBlank || tab.shy)
         } else {
             Button("Change Letter") { browser.editLetter(tab) }
             Button("Unpin") { browser.unpin(tab) }

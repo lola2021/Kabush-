@@ -722,17 +722,21 @@ enum Mozilla {
         }
 
         // A page is type 1, a folder type 2. The tags folder is Firefox's own
-        // bookkeeping, not bookmarks, so it is left out.
-        func children(of parent: Int64) -> [Bookmark] {
-            (byParent[parent] ?? []).compactMap { item in
+        // bookkeeping, not bookmarks, so it is left out. A damaged file can
+        // make a folder its own ancestor: each folder is taken once, and no
+        // deeper than a person ever files one.
+        var taken = Set<Int64>()
+        func children(of parent: Int64, depth: Int = 0) -> [Bookmark] {
+            guard depth < 64 else { return [] }
+            return (byParent[parent] ?? []).compactMap { item in
                 if item.type == 1 {
                     guard let raw = item.url, let url = URL(string: raw),
                           url.scheme == "http" || url.scheme == "https"
                     else { return nil }
                     return .site(item.title, url)
                 }
-                guard item.type == 2, item.guid != "tags________" else { return nil }
-                return .folder(item.title.isEmpty ? "Folder" : item.title, children(of: item.id))
+                guard item.type == 2, item.guid != "tags________", taken.insert(item.id).inserted else { return nil }
+                return .folder(item.title.isEmpty ? "Folder" : item.title, children(of: item.id, depth: depth + 1))
             }
         }
 

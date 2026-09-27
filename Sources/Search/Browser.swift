@@ -677,6 +677,9 @@ final class Browser: NSObject, ObservableObject {
     var pinnedCount: Int { tabs.filter { $0.pin != nil }.count }
 
     func pin(_ tab: Tab) {
+        // Pins are the space's, kept on disk and shown in every window: a
+        // private tab can't be one, or its page would outlive it there.
+        guard !tab.shy else { return }
         if tab.pin == nil {
             let previousGroup = tab.groupID
             tab.groupID = nil
@@ -1318,7 +1321,7 @@ final class Browser: NSObject, ObservableObject {
     /// What makes this row's pinned tabs pins, in their order.
     private func pinDefs(_ row: [Tab]) -> [PinDef] {
         row.compactMap { tab -> PinDef? in
-            guard let letter = tab.pin else { return nil }
+            guard let letter = tab.pin, !tab.shy else { return nil }
             if tab.pinID == nil { tab.pinID = UUID() }
             return PinDef(id: tab.pinID ?? UUID(), letter: letter,
                           home: (tab.home ?? tab.pending ?? tab.address)?.absoluteString ?? "",
@@ -1333,8 +1336,8 @@ final class Browser: NSObject, ObservableObject {
     /// then by place.
     func reconcilePins(_ row: [Tab], space: UUID) -> [Tab] {
         let defs = Pins.defs(space)
-        var pinned = row.filter { $0.pin != nil }
-        let loose = row.filter { $0.pin == nil }
+        var pinned = row.filter { $0.pin != nil && !$0.shy }
+        let loose = row.filter { $0.pin == nil || $0.shy }
         var out: [Tab] = []
         for def in defs {
             let found = pinned.first { $0.pinID == def.id }
@@ -1459,7 +1462,9 @@ final class Browser: NSObject, ObservableObject {
     /// bench's, and only with a web address. A sleeping view is blank, so
     /// `pending` must win or its page will disappear from the next session.
     private func kept(_ tab: Tab) -> Bool {
-        !tab.shy && !tab.bench && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
+        // A tab holding an extension's sign-in answer (Tab.hold) carries its
+        // code in the address: that is never written down.
+        !tab.shy && !tab.bench && tab.held == nil && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
     /// Another space's row. Its groups are the ones in its own file, the
@@ -2031,10 +2036,12 @@ final class Browser: NSObject, ObservableObject {
         // extension's configuration.
         let url = Browser.page(url)
         let page = Browser.extensionConfiguration(for: url)
+        // A new tab is in this window's space, with its sign-ins — not the
+        // space of whichever window is in front, when this one is behind it.
         let tab = if let source, source.shy, page == nil {
             Tab(shy: true, configuration: Web.configuration(shy: true, store: source.store))
         } else {
-            Tab(configuration: page)
+            Tab(configuration: page ?? Web.configuration(space: spaceID))
         }
         prepare(tab)
         // A link opened from a grouped tab joins its group, only while groups
@@ -2072,7 +2079,7 @@ final class Browser: NSObject, ObservableObject {
             Tab(shy: true, bench: tab.bench, configuration: page
                 ?? Web.configuration(shy: true, store: tab.store.isPersistent ? nil : tab.store))
         } else {
-            Tab(bench: tab.bench, configuration: page)
+            Tab(bench: tab.bench, configuration: page ?? Web.configuration(space: spaceID))
         }
         // Preserve the sign-in popup's link to the page that opened it —
         // and, since a website can now start the swap, what you made of the
@@ -2911,7 +2918,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         let asker = source?.securityOrigin.host.lowercased() ?? ""
         let ownSite = source?.isMainFrame == true
             || (!top.isEmpty && !asker.isEmpty && Vault.registrable(asker) == Vault.registrable(top))
-        guard action.targetFrame?.isMainFrame ?? true || clicked || ownSite else {
+        // No target frame is a new window asked for: the frame asking is
+        // judged, as for any other frame.
+        guard action.targetFrame?.isMainFrame ?? false || clicked || ownSite else {
             if Store.testing { Browser.handedOff.append("\(scheme): ignored") }
             return
         }

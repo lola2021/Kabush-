@@ -25,7 +25,7 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     /// `front: false` makes it without showing it — for the bench, which
     /// must never put a window on screen.
     static func show(_ url: URL, for browser: Browser, front: Bool = true) {
-        let tab = Tab()
+        let tab = Tab(configuration: Web.configuration(space: browser.spaceID))
         browser.prepare(tab)
         tab.go(to: url)
         let little = LittleWindow(tab: tab, browser: browser)
@@ -87,8 +87,9 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         // Into the window in front, whichever that is now.
         guard let browser = Browsers.front ?? browser else { return }
         kept = true
-        browser.insert(tab, at: browser.placeForNew())
-        browser.select(tab)
+        // As a tab moved from another window is: this window's delegate,
+        // and this window's space, with its sign-ins.
+        browser.receive(tab)
         window.close()
         (browser.window ?? NSApp.windows.first { $0.contentView != nil && !($0 is NSPanel) && $0 !== window })?
             .makeKeyAndOrderFront(nil)
