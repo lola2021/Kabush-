@@ -445,26 +445,54 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    /// Takes in a CSV as Google Password Manager exports one. The file is read
-    /// once and never copied.
-    func importPasswords() {
+    /// Something another browser exported: a bookmarks page, a passwords
+    /// file, or Safari's own export (see ImportFile). Read once, never copied.
+    func importFile() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
+        panel.allowedContentTypes = [.html, .commaSeparatedText, .plainText, .zip, .json]
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Import"
-        panel.message = "A passwords export, as Chrome, Dia or Google Password Manager write it."
+        panel.prompt = "Bring In"
+        panel.message = "A file another browser exported: bookmarks (.html), passwords (.csv), or Safari's File › Export Browsing Data (.zip)."
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            announce("Couldn't read that file as text")
-            return
+        announce(takeFile(url).said)
+    }
+
+    /// The file's bookmarks, history and passwords, taken in as a browser's
+    /// are: bookmarks merged without doubles, history counted once. Says
+    /// what came in, and after Safari's export, that the file holds your
+    /// passwords in the clear.
+    @discardableResult
+    func takeFile(_ url: URL) -> (said: String, bookmarks: Int, already: Int, places: Int, kept: Int, skipped: Int) {
+        let found = ImportFile.read(url)
+        guard !found.isEmpty else {
+            return ("Nothing to bring in from that file", 0, 0, 0, 0, 0)
         }
-        let result = Vault.take(csv: text)
-        relist()
-        announce(
-            result.skipped == 0
-                ? "\(result.kept) passwords in the keychain"
-                : "\(result.kept) in the keychain, \(result.skipped) skipped"
-        )
+        let name = found.fromSafari ? "Safari" : url.deletingPathExtension().lastPathComponent
+        let (added, already) = bookmarks.take(found.bookmarks, from: name)
+        for place in found.places { history.take(place.url, title: place.title, count: place.count, last: place.last) }
+        if !found.places.isEmpty { history.settle() }
+        var kept = 0, skipped = 0
+        for text in found.passwords {
+            let result = Vault.take(csv: text)
+            kept += result.kept
+            skipped += result.skipped
+        }
+        if !found.passwords.isEmpty { relist() }
+        func count(_ n: Int, _ one: String, _ many: String) -> String { n == 1 ? "1 \(one)" : "\(n) \(many)" }
+        var parts: [String] = []
+        if added > 0 || already > 0 {
+            parts.append(already == 0 ? count(added, "bookmark", "bookmarks") : "\(count(added, "new bookmark", "new bookmarks")), \(already) already here")
+        }
+        if !found.places.isEmpty { parts.append(count(found.places.count, "place", "places")) }
+        if kept > 0 || skipped > 0 {
+            parts.append(skipped == 0 ? count(kept, "password", "passwords") : "\(count(kept, "password", "passwords")), \(skipped) skipped")
+        }
+        var said = parts.joined(separator: " · ")
+        if found.fromSafari, kept > 0 {
+            said += " — the exported file holds your passwords in the clear: delete it now"
+        }
+        return (said, added, already, found.places.count, kept, skipped)
     }
 
     // MARK: - what is kept, and getting rid of it

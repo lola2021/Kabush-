@@ -55,6 +55,7 @@
     ./bench pull DX [STEPS] [MS]       test run: two fingers DX points sideways over the page (back is +) — where it went
     ./bench keyeq CHARS CODE [shift]   test run: ⌘CHARS pressed while the page has the keyboard — who took it
     ./bench import BROWSER [WHAT…]   test run: bookmarks, history, passwords from a made-up profile in the world's Import/
+    ./bench import-file PATH         test run: a bookmarks .html, a passwords .csv or Safari's export .zip, as File… brings it
     ./bench menu [open]                test run: the Bookmarks menu as it is about to open, and its first
                                        folder (open: its first bookmark picked)
     ./bench bookmark URL [new]         test run: a bookmark picked from the list, timed until it loads
@@ -253,6 +254,9 @@ def main(argv):
         if not args or any(a not in kinds for a in args[1:]): sys.exit("usage: bench import BROWSER [bookmarks] [history] [passwords]")
         request["from"] = args[0]
         request["what"] = args[1:]
+    elif verb == "import-file":
+        if len(args) != 1: sys.exit("usage: bench import-file PATH")
+        request["path"] = os.path.abspath(args[0])
     elif verb == "menu":
         if args not in ([], ["open"]): sys.exit("usage: bench menu [open]")
         request["open"] = args == ["open"]

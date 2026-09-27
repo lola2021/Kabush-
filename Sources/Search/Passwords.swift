@@ -72,7 +72,7 @@ struct PasswordsPanel: View {
                         }
                         .disabled(importing != nil)
                     }
-                    Pill("CSV file…") { browser.importPasswords() }
+                    Pill("File…") { browser.importFile() }
                         .disabled(importing != nil)
                     Spacer(minLength: 0)
                     if let importing {

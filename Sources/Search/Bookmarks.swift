@@ -573,6 +573,7 @@ struct BookmarksPanel: View {
                 ForEach(ImportSource.installed()) { source in
                     Pill(source.name) { browser.takeBookmarks(from: source) }
                 }
+                Pill("File…") { browser.importFile() }
                 Spacer()
                 Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
                     .font(.system(size: 12))

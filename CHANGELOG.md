@@ -33,6 +33,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Bringing things over also finds Chrome Beta, Chrome Dev and Chrome Canary, which keep their data apart from Chrome, and Opera and Opera GX.
 - Bringing things over works from Firefox and Zen too: their bookmarks and history, from every profile on this Mac. Passwords stay with the Chromium browsers for now. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#215](https://github.com/driceroland/Search/pull/215))
 - Firefox and Zen passwords come over as well, when there is no primary password: the key is read from key4.db and each login decrypted, whether the profile keeps them the newer way (AES-256) or the older (3DES). They land in your keychain like any other. A profile with a primary password is left alone — Search says to export those from Firefox and bring in the CSV, rather than ask for it.
+- Bring things over from a file another browser exported: a bookmarks page (.html, which every browser writes), a passwords file (.csv), or Safari's own export (File › Export Browsing Data), with its bookmarks, its passwords and the history of each profile. From Welcome, and from File… in Bookmarks and Passwords, where CSV file… was. Bringing the same file in again adds only what is new, and after Safari's export Search reminds you that the file holds your passwords in the clear.
 
 ### Fixed
 

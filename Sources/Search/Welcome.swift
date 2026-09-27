@@ -119,6 +119,10 @@ struct WelcomePanel: View {
                 }
                 .animation(Motion.settle, value: brought)
             }
+
+            // Safari, a browser on another Mac, one Search can't read: what
+            // it exported, bookmarks, passwords or Safari's own ZIP.
+            Pill("From a file another browser exported…") { browser.importFile() }
         }
     }
 

@@ -774,6 +774,16 @@ final class Bench {
             }
             answer(out)
 
+        case "import-file":
+            // A file another browser exported, through the same call the
+            // File… buttons make after their chooser. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "import-file only works on a --test run"]); return }
+            guard let path = request["path"] as? String else { answer(["error": "import-file needs a path"]); return }
+            let took = browser.takeFile(URL(fileURLWithPath: path))
+            answer(["said": took.said, "bookmarks": took.bookmarks, "already": took.already, "places": took.places,
+                    "kept": took.kept, "skipped": took.skipped, "total": browser.bookmarks.count,
+                    "top": browser.bookmarks.roots.map(\.title), "saved": browser.saved.count])
+
         case "menu":
             // The Bookmarks menu as it is about to open: the menu bar
             // told it is being tracked, SwiftUI's own update run on it, its
