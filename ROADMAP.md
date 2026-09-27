@@ -35,6 +35,10 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
   security report sent privately never comes here, not even in outline: it
   is fixed, it ships, and only then is it credited in CHANGELOG.md.
 
+## Being built now
+
+- [ ] **Extensions with “tabs” can't see addresses** In Chrome the tabs permission lets an extension read every tab's address and title. WebKit only shows them where the extension has host access, so tab managers and the like see empty tabs in Search.
+
 ## Done, in the next version
 
 - [x] **Bitwarden goes blank after sign-in** For one person it doesn't load at all. Before signing in it works — popup, WebAssembly, background. Probably fixed by 1Password's worker fix ([#126](https://github.com/driceroland/Search/pull/126)) and the extension storage fix in 1.0.2; needs a real account to confirm. Also asked: a self-hosted Vaultwarden server behind the extension. *(X, email ×2, [#343](https://github.com/driceroland/Search/pull/343))*
@@ -107,10 +111,8 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 
 ## Now — fixes for the next update
 
-- [ ] **Bitwarden on Intel Macs** The extension says "WebAssembly is not supported" on an Intel Mac. *([#175](https://github.com/driceroland/Search/issues/175))*
 - [ ] **Google sign-in flashes with Proton Pass** With Proton Pass signed in, Google's sign-in page reloads every half second. Presumed fixed in 1.0.2 by [#126](https://github.com/driceroland/Search/pull/126) and the passkey changes; to confirm with the person who saw it. *(X)*
 - [ ] **Vimium C's keys do nothing** Its background starts from 1.0.4, where WebKit failed to load it; its keys don't answer yet. The original Vimium works meanwhile. *(X, email, [#170](https://github.com/driceroland/Search/pull/170))*
-- [ ] **Passkeys under the sign-in field** A site's passkey button brings up the Mac's passkey sheet now; next is the suggestion Safari shows as you click into a sign-in field. *([#17](https://github.com/driceroland/Search/issues/17), X)*
 - [ ] **Window stutters between screens** Dragging the window from one screen to another stutters. Needs a trace recorded on two screens. *(X)*
 - [ ] **Web processes start before the window** The web process pool is made before the first window; check whether 1.0.2's launch order already covers it. *([#157](https://github.com/driceroland/Search/issues/157))*
 - [ ] **⌘F lands on the back button** On some pages ⌘F focuses the back button instead of the find field. *([#172](https://github.com/driceroland/Search/issues/172))*
@@ -134,15 +136,14 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 - [ ] **Floating video jumps on the way in and out** Floating a video, or landing it back in its tab, makes it jump in size and flicker, most visibly on YouTube. *([#246](https://github.com/driceroland/Search/issues/246), [#257](https://github.com/driceroland/Search/issues/257))*
 - [ ] **⌘Return in the address field duplicates** After ⌘L, ⌘Return opens a copy of the current tab instead of reloading it. *([#249](https://github.com/driceroland/Search/issues/249), [#311](https://github.com/driceroland/Search/pull/311))*
 - [ ] **Move & Resize greyed out** macOS's Window › Move & Resize commands and their shortcuts don't work on Search's window. *([#286](https://github.com/driceroland/Search/issues/286))*
-- [ ] **User scripts fail on GitHub** ScriptCat's GM_xmlhttpRequest works in the next version (#319). Tampermonkey's scripts on sites with a strict content security policy still don't run: WebKit checks the script it inserts against the page's policy, and gives apps no way around it. In Tampermonkey, Sandbox Mode › JavaScript and DOM works today. *([#289](https://github.com/driceroland/Search/issues/289), [#319](https://github.com/driceroland/Search/issues/319))*
 - [ ] **Unload a tab by hand** Put a tab to sleep, or every other tab, keeping it in the row until it's shown again. *([#310](https://github.com/driceroland/Search/issues/310))*
 - [ ] **⌘Return keeps a peek as a tab** While a peek is open, ⌘Return keeps it as a tab, the way Escape puts it away. *([#325](https://github.com/driceroland/Search/issues/325), [#326](https://github.com/driceroland/Search/pull/326))*
 - [ ] **Keep running after the window closes** Closing the window leaves Search running, as most Mac apps do. *([#327](https://github.com/driceroland/Search/issues/327))*
 - [ ] **Dock icon dark on dark** With macOS's dark Dock icons, Search's icon is black on black. *([#337](https://github.com/driceroland/Search/issues/337))*
-- [ ] **Extensions with “tabs” can't see addresses** In Chrome the tabs permission lets an extension read every tab's address and title. WebKit only shows them where the extension has host access, so tab managers and the like see empty tabs in Search.
 
 ## Next — small additions people asked for
 
+- [ ] **Passkeys under the sign-in field** Passkeys listed under the sign-in field, as Safari does. About two days of work, and it needs a real passkey test on a signed build. *([#17](https://github.com/driceroland/Search/issues/17), X)*
 - [ ] **Site search keywords** Type a site's keyword, then your search. *([#188](https://github.com/driceroland/Search/pull/188))*
 - [ ] **Address bar commands** A word like "settings" reaches the app itself. *([#212](https://github.com/driceroland/Search/pull/212), email)*
 - [ ] **Hold a swipe to pick from history** Hold a back or forward swipe to pick a page from history. *([#191](https://github.com/driceroland/Search/pull/191))*
@@ -155,6 +156,7 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 - [ ] **Intel Macs** One build for both kinds of Mac, only as a change to build.sh, as [#100](https://github.com/driceroland/Search/pull/100) began. *([#46](https://github.com/driceroland/Search/issues/46), X)*
 - [ ] **⌃Tab in recent-use order** ⌃Tab goes to the tab used last in this space, not the neighbour in the row; holding it walks back through them. Also asks for its own shortcut recorders in Settings › Tabs. *([#225](https://github.com/driceroland/Search/pull/225), [#345](https://github.com/driceroland/Search/issues/345), [#356](https://github.com/driceroland/Search/pull/356), email ×2)*
 - [ ] **A downloads button** A button beside Bookmarks opens the downloads panel, to follow a download's progress. The PR also closes every other tab with ⇧⌘K and extends the ⌃Tab switcher. *([#330](https://github.com/driceroland/Search/pull/330), [#353](https://github.com/driceroland/Search/issues/353), email)*
+- [ ] **Tampermonkey can't install from a link** Its rule that catches .user.js links is one WebKit refuses (a regular expression it doesn't support), so a script has to be pasted into Tampermonkey's editor. *([#289](https://github.com/driceroland/Search/issues/289))*
 
 ## Later — bigger pieces of work
 
@@ -165,6 +167,7 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 - [ ] **Faster animations** Spaces especially, compared with Zen. *(email)*
 - [ ] **Extensions per space** Each space with the extensions it wants, on and off apart from the others. WebKit has one extension controller for the whole app, so this means one per space. Drice's call, 24 Sep: later. *(X)*
 - [ ] **Turn the floating video off per site** Choose the sites where a video never floats. *([#267](https://github.com/driceroland/Search/issues/267))*
+- [ ] **User scripts fail on GitHub** Tampermonkey runs each script through an inline script, and WebKit holds it to the page's content security policy, where Chrome exempts it; GitHub's policy blocks it. No safe narrow fix yet. *([#289](https://github.com/driceroland/Search/issues/289), [#319](https://github.com/driceroland/Search/issues/319))*
 - [ ] **Select several tabs** Select tabs with ⌘-click and ⇧-click, then copy all their addresses at once. *([#309](https://github.com/driceroland/Search/issues/309))*
 - [ ] **Optional ad-blocking add-on** A stronger blocker as an optional add-on in Settings, downloaded on demand so it only takes space for those who want it. Search's built-in blocker stays as it is meanwhile. *(message)*
 
@@ -182,6 +185,7 @@ in it is stale. Whoever works on Search keeps it that way, with `./ideas`
 
 ## Asked to try again on the latest version
 
+- [ ] **Bitwarden on Intel Macs** Not reproduced on an Intel build run here, where Bitwarden's SDK loads; likely macOS 15's WebKit rather than the chip. Asked for the popup's console errors and the macOS version. *([#175](https://github.com/driceroland/Search/issues/175))*
 - [ ] **Google asks for a reCAPTCHA** Google search asks for a reCAPTCHA. 1.0.2 no longer tells pages it is a separate app and says it is Safari. *([#26](https://github.com/driceroland/Search/issues/26))*
 - [ ] **A tab loses track of its site** A tab's site switches, and the tab doesn't follow. Not reproduced. *([#28](https://github.com/driceroland/Search/issues/28))*
 - [ ] **Page shortcuts vs Search's** Keep a page's editing shortcuts while Search's own still work. 1.0.2 gives the page the first go at its shortcuts; asked whether it's enough. *([#147](https://github.com/driceroland/Search/issues/147), [#238](https://github.com/driceroland/Search/issues/238), email)*
