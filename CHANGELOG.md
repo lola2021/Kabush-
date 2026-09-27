@@ -42,6 +42,7 @@ in [ROADMAP.md](ROADMAP.md).
 - NordPass finishes signing in instead of showing "The page didn't load" after authentication: its return to the extension now opens with the configuration WebKit requires, once Search has checked that the website may open that page of the extension (one it lists as public, reached by a plain link from an https page, never in a frame or a private tab). A pinned or named tab keeps its pin and name through the change. Thanks [@SimonDesdevises](https://github.com/SimonDesdevises) ([#323](https://github.com/driceroland/Search/pull/323), [#98](https://github.com/driceroland/Search/issues/98))
 - Passbolt's popup is no longer empty: its background turned the popup away because it came as a tab, where Chrome sends a popup's messages with none; now it comes as Chrome's does. Thanks for the report ([#300](https://github.com/driceroland/Search/issues/300))
 - The Claude extension starts: its background stopped at once on a name Search didn't provide (`chrome.tabGroups.Color`), and the tab its button opens showed nothing, its address escaped. An extension page asked for with a query, a side panel's or an offscreen page's, now keeps it, and is always one of the extension's own.
+- A link's right-click menu says Open Link in New Tab, which is what it does: it said Open Link in New Window, as WebKit names it, and opened a tab. Thanks [@AxxzyWasTaken](https://github.com/AxxzyWasTaken) ([#296](https://github.com/driceroland/Search/pull/296), [#295](https://github.com/driceroland/Search/issues/295))
 
 ## 1.0.3 — 24 September 2026
 
