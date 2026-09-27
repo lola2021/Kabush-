@@ -64,6 +64,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Window › Move & Resize works, and so do macOS's tiling shortcuts and the apps that arrange windows: the window said it couldn't be moved, so that a tab picked up in the tab bar wouldn't take the window with it. It is movable now except while you press, which keeps that. ([#286](https://github.com/driceroland/Search/issues/286))
 - Tab managers and other extensions with the "tabs" permission see every tab's address, title and icon, as in Chrome, and hear when a tab's address or title changes; before, only tabs on sites they could also run on showed them. Private tabs stay hidden from them unless Settings › Extensions allows private tabs, and other extensions' pages stay blank.
 - Extensions put a bookmark where they ask: `chrome.bookmarks.create` and `chrome.bookmarks.move` with an `index` place it there in the folder, where it always went to the end, and a move that names no folder leaves it in the one it is in instead of taking it to the top.
 - The Figma extension signs in. After the provider's Allow, an extension that watches its sign-in tab for its own chromiumapp.org address, as Chrome allows, now sees it and gets its answer; nothing is loaded from that address, and a tab left there says there is no site, as before.
