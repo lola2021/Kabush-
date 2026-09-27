@@ -17,6 +17,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Started hidden, at login for one, Search loads its extensions before the page it brings back, so their scripts meant to run first run first on it, as they did until 1.0.2. Thanks [@TesterPen0812](https://github.com/TesterPen0812) for the report ([#199](https://github.com/driceroland/Search/issues/199))
 - A link clicked in Notion, or another app built on Electron, brings Search to the front: those apps don't hand the front over as macOS 14 expects, and Search stayed behind them.
 - A dev server's address opens as it does in Chrome: 0.0.0.0:3000, which many servers print, opens this Mac (WebKit showed nothing there), [::1]:3000 is understood, and a device on the network by name, homeassistant.local, or on 172.16–31.x.x is reached over http instead of failing on https.
 - ⌘← and ⌘→ go back and forward again, as they did until 1.0.2: since the page gets its shortcuts first, WebKit took them to scroll and never handed them back. In a text box they still move the caret, now in a text box inside a frame too, such as a comment box embedded from another site, where they went back and lost what was typed. Thanks [@Aaditya2605](https://github.com/Aaditya2605) ([#293](https://github.com/driceroland/Search/pull/293)), and everyone who asked ([#324](https://github.com/driceroland/Search/issues/324))

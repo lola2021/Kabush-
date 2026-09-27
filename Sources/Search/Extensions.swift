@@ -70,6 +70,10 @@ final class Extensions: NSObject, ObservableObject {
     private var order: [Tab.ID] = []
     private var watching: [Tab.ID: [AnyCancellable]] = [:]
     private var bag = Set<AnyCancellable>()
+    /// Every extension switched on has loaded, at launch.
+    private(set) var started = false
+    /// Waiting for that (see whenStarted).
+    private var onStarted: [() -> Void] = []
     private(set) lazy var window = ExtensionWindow(owner: self)
     /// Where each extension's button is on screen, for its popup to hang from.
     var anchors: [String: WeakView] = [:]
@@ -139,24 +143,54 @@ final class Extensions: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] pair in self?.activated(from: pair.0, to: pair.1) }
             .store(in: &bag)
-        // Once the window is up: loading one takes the main thread for tens
-        // of milliseconds (uBlock Origin Lite, 45), and the first frame
-        // waited behind it.
-        Links.onceShown { [weak self] in
-            Task { [weak self] in
+        let begin: @MainActor () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self else { return }
                 await forgetWorkersIfChanged()
                 // One after another, a moment apart: started all at once, WebKit
                 // fails some of their workers and never tries them again.
-                for item in installed where item.enabled {
+                let enabled = installed.filter(\.enabled)
+                for (n, item) in enabled.enumerated() {
                     await load(item)
-                    if contexts[item.id]?.webExtension.hasBackgroundContent == true {
+                    if n < enabled.count - 1, contexts[item.id]?.webExtension.hasBackgroundContent == true {
                         try? await Task.sleep(for: .milliseconds(400))
                     }
                 }
+                markStarted()
                 checkForUpdates()
             }
         }
+        // Once the window is up: loading one takes the main thread for tens
+        // of milliseconds (uBlock Origin Lite, 45), and the first frame
+        // waited behind it. A launch started hidden has no frame to wait
+        // for, and waited a second or so for a window that doesn't show
+        // while the page it restored loaded without its extensions (#199).
+        if NSApp.isHidden { begin() } else { Links.onceShown(begin) }
+    }
+
+    /// Whether a page loaded now would miss extensions still to load.
+    var starting: Bool { !started && installed.contains(where: \.enabled) }
+
+    /// Runs once every extension switched on has loaded, or after `limit`
+    /// seconds, whichever comes first — for a page that should have its
+    /// extensions' early scripts, and shouldn't wait forever for them.
+    func whenStarted(within limit: TimeInterval, _ then: @escaping () -> Void) {
+        guard starting else { return then() }
+        var done = false
+        let once: @MainActor () -> Void = {
+            guard !done else { return }
+            done = true
+            then()
+        }
+        onStarted.append(once)
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) { MainActor.assumeIsolated { once() } }
+    }
+
+    private func markStarted() {
+        started = true
+        let waiting = onStarted
+        onStarted = []
+        waiting.forEach { $0() }
     }
 
     // MARK: - workers WebKit remembers

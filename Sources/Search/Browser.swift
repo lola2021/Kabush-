@@ -878,8 +878,16 @@ final class Browser: NSObject, ObservableObject {
         }
         let here = min(max(0, saved.active), tabs.count - 1)
         activeID = tabs[here].id
-        // Only the one you were looking at actually loads.
-        tabs[here].wake()
+        // Only the one you were looking at actually loads. Started hidden,
+        // it waits for the extensions, which load at once then, so that
+        // their scripts meant to run before the page's do (#199); a
+        // visible launch keeps loading it alongside the first frame.
+        let first = tabs[here]
+        if #available(macOS 15.4, *), NSApp.isHidden, Extensions.shared.starting {
+            Extensions.shared.whenStarted(within: 1.5) { [weak first] in _ = first?.wake() }
+        } else {
+            first.wake()
+        }
     }
 
     /// The few settings that something else has to be told about. The rest are
