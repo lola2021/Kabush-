@@ -17,6 +17,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Extension popups work again as they did before 1.0.3: Dark Reader's stayed on "Loading" ([#320](https://github.com/driceroland/Search/issues/320)), and others checking where their popup is loaded from refused it. 1.0.3 loaded each popup from a copy of its page under another name, which those extensions don't recognise; the popup is its own page again, and Bitwarden's still learns a change of server while it is open.
 - A window a page opens at a size of its own, a sign-in window for one, is named in the tabs by its site rather than by its title, which the page chooses: one called "Sign in with Google" from another address no longer passes for Google's. A plain link opened in a new tab keeps its title, and a name you gave a tab stays first.
 - A link from another app, or one opened from a pinned tab, comes first after the pins instead of landing between two of them. ([#219](https://github.com/driceroland/Search/issues/219))
 - The shortcuts card lists ⇧⌘C, Copy Address, which only the Tabs menu showed. Thanks [@merttopuz](https://github.com/merttopuz) ([#182](https://github.com/driceroland/Search/pull/182)), and [@olllayor](https://github.com/olllayor) for asking ([#176](https://github.com/driceroland/Search/issues/176))

@@ -648,40 +648,6 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
-    /// The copy an extension's popup page is loaded from, beside it.
-    ///
-    /// WebKit takes any page at the path of an extension's popup for its own
-    /// popup, and a popup that isn't in WebKit's own view (Search's is its
-    /// own, see ExtensionPopup) is sent no events: no storage.onChanged, no
-    /// tabs.onUpdated. Bitwarden's popup never heard that its server had
-    /// changed to a self-hosted one, and signed in to bitwarden.com, where
-    /// that account doesn't exist. Its "pop out" tab had the same trouble.
-    /// So the page is loaded from a copy under another name, in the same
-    /// folder: the same file, the same files around it, and none of WebKit's
-    /// rules for popups. Anything else is loaded as it is.
-    static let popupCopy = ".search-popup"
-
-    static func unpopped(_ url: URL) -> URL {
-        guard url.scheme == scheme, let id = url.host, let context = shared.contexts[id],
-              !url.lastPathComponent.contains(popupCopy)
-        else { return url }
-        let named = [popupURL(for: context)] + (ExtensionShims.popups[id]?.values.map { URL(string: $0, relativeTo: context.baseURL)?.absoluteURL } ?? [])
-        guard named.contains(where: { $0?.path == url.path }) else { return url }
-        let folder = Extensions.folder(for: id)
-        guard let original = ExtensionShims.inside(url.path, of: folder),
-              let data = try? Data(contentsOf: original)
-        else { return url }
-        let ext = original.pathExtension
-        let name = original.deletingPathExtension().lastPathComponent + popupCopy + (ext.isEmpty ? "" : "." + ext)
-        let copy = original.deletingLastPathComponent().appendingPathComponent(name)
-        if (try? Data(contentsOf: copy)) != data {
-            guard (try? data.write(to: copy, options: .atomic)) != nil else { return url }
-        }
-        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
-        parts.path = (url.path as NSString).deletingLastPathComponent.appending("/" + name).replacingOccurrences(of: "//", with: "/")
-        return parts.url ?? url
-    }
-
     /// The page the manifest names for the button, when WebKit hasn't said.
     static func popupURL(for context: WKWebExtensionContext) -> URL? {
         let manifest = context.webExtension.manifest

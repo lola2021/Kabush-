@@ -159,7 +159,7 @@ enum ExtensionShims {
     /// read through it and written back over it as a regular file, so a
     /// link to a file elsewhere would put that file's bytes in the package.
     /// A folder on the way that is a link is caught by where it resolves.
-    nonisolated static func inside(_ name: String, of folder: URL) -> URL? {
+    nonisolated private static func inside(_ name: String, of folder: URL) -> URL? {
         let path = folder.appendingPathComponent(name.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).standardizedFileURL
         guard path.path.hasPrefix(folder.standardizedFileURL.path + "/"),
               (try? path.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
@@ -1345,6 +1345,46 @@ enum ExtensionShims {
         managed: { get: resolve({}), getBytesInUse: resolve(0), onChanged: event() },
         AccessLevel: { TRUSTED_CONTEXTS: "TRUSTED_CONTEXTS", TRUSTED_AND_UNTRUSTED_CONTEXTS: "TRUSTED_AND_UNTRUSTED_CONTEXTS" },
       });
+      // A page at the address of the extension's popup hears no events
+      // from WebKit: WebKit takes it for its own popup, and Search's popup
+      // is a view of Search's. The one that matters, storage.onChanged —
+      // Bitwarden learns a self-hosted server's address from it — is passed
+      // on by the background, which does hear it, to such pages: the popup,
+      // and the same page opened in a tab ("pop out"). They keep their
+      // address, which extensions check (Dark Reader only answers its popup
+      // at its own).
+      {
+        const manifest = (() => { try { return runtime.getManifest() || {}; } catch (e) { return {}; } })();
+        const action = manifest.action || manifest.browser_action || {};
+        let popupPath = null;
+        try { if (typeof action.default_popup === "string" && action.default_popup) popupPath = new URL(action.default_popup, location.origin + "/").pathname; } catch (e) {}
+        const relay = popupPath && !embedded && typeof BroadcastChannel === "function" ? new BroadcastChannel("search-storage") : null;
+        if (relay && background && chrome.storage && chrome.storage.onChanged) {
+          kept.add(chrome.storage.onChanged);
+          chrome.storage.onChanged.addListener((changes, area) => {
+            try { relay.postMessage({ changes, area }); } catch (e) {}
+          });
+        } else if (relay && !background && typeof location !== "undefined" && location.pathname === popupPath && chrome.storage) {
+          const all = new Set(), byArea = {};
+          const mend = (ev, set) => {
+            if (!ev || typeof ev !== "object") return;
+            put(ev, "addListener", (f) => { if (typeof f === "function") set.add(f); });
+            put(ev, "removeListener", (f) => { set.delete(f); });
+            put(ev, "hasListener", (f) => set.has(f));
+            put(ev, "hasListeners", () => set.size > 0);
+          };
+          mend(chrome.storage.onChanged, all);
+          for (const area of ["local", "sync", "session", "managed"]) {
+            const store = chrome.storage[area];
+            if (store && store.onChanged) mend(store.onChanged, byArea[area] = new Set());
+          }
+          relay.onmessage = ({ data }) => {
+            if (!data || !data.changes) return;
+            for (const f of [...all]) { try { f(data.changes, data.area); } catch (e) { console.error(e); } }
+            for (const f of [...(byArea[data.area] || [])]) { try { f(data.changes); } catch (e) { console.error(e); } }
+          };
+        }
+      }
       // Items built with Object.create(null) — Chrome stores them, WebKit
       // throws that an object is expected.
       for (const area of ["local", "sync", "session"]) {
