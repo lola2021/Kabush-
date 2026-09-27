@@ -271,7 +271,7 @@ struct SideBar: View {
 
     private var pinnedTabs: [Tab] { browser.tabs.filter { $0.pin != nil } }
     private var looseTabs: [Tab] {
-        browser.tabs.filter { $0.pin == nil && (!prefs.usesTabGroups || $0.groupID == nil) }
+        browser.tabs.filter { $0.pin == nil && (!prefs.usesTabGroups || browser.group(of: $0) == nil) }
     }
 
     /// Three columns is the block's own shape — up to six pins, that's two
