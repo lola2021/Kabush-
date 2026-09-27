@@ -150,6 +150,30 @@ enum Muter {
     }
 }
 
+/// How far down its page a tab is. Its own object, watched by the fill in
+/// the tab's pill alone: as part of the tab, every percent scrolled re-ran
+/// everything that watches the tab — the page's stage, the buttons, the
+/// row — two to four milliseconds of the window's time each, while WebKit
+/// needed that thread to put the scrolled page on screen.
+@MainActor
+final class Reading: ObservableObject {
+    @Published var value: Double = 0
+}
+
+/// The fill itself: the grey that grows from the left of the tab you are on
+/// as you read down its page, in a width it is given.
+struct ReadingFill: View {
+    @ObservedObject var meter: Reading
+    let width: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.ink.opacity(0.055))
+            .frame(width: width * meter.value)
+            .animation(.easeOut(duration: 0.15), value: meter.value)
+    }
+}
+
 @MainActor
 final class Tab: ObservableObject, Identifiable {
     let id = UUID()
@@ -208,8 +232,13 @@ final class Tab: ObservableObject, Identifiable {
     /// connection. Shown in place of the page rather than in a dialog.
     @Published var failure: String?
     /// How far down the page you are, nought to one. The tab's own pill fills
-    /// with it.
-    @Published var reading: Double = 0
+    /// with it. Kept apart from the rest of the tab (see Reading): it changes
+    /// all the way down a page, and only the fill has any use for it.
+    let meter = Reading()
+    var reading: Double {
+        get { meter.value }
+        set { if meter.value != newValue { meter.value = newValue } }
+    }
 
     /// True while the page has been stripped back to its article.
     @Published private(set) var reader = false
