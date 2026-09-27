@@ -49,6 +49,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The site card grows to show a connection's details in full, with Show Certificate and Back, and shrinks again on Back, where it kept its first size and cut them off. Thanks [@kinnrai](https://github.com/kinnrai) ([#258](https://github.com/driceroland/Search/pull/258))
 - The Web Inspector docked beside a page is still there when you come back to its tab. Switching away took it off, and back on the tab the page sat short beside an empty space, black or white with the look, where it had been; one tab's inspector no longer stays beside another tab's page either. Thanks [@ductan2](https://github.com/ductan2) ([#278](https://github.com/driceroland/Search/pull/278))
 - The floating video moves, or sizes from its corner, on the first click: the first press on the picture used to go only to making its window the one in front, and it moved on the second. Thanks [@teh33](https://github.com/teh33) ([#279](https://github.com/driceroland/Search/pull/279))
+- The download button in the bar over a PDF saves the PDF to your downloads folder, or asks where first when Settings › Downloads says to, and lists it in Downloads. It did nothing. Thanks [@Aaditya2605](https://github.com/Aaditya2605) ([#290](https://github.com/driceroland/Search/pull/290), [#284](https://github.com/driceroland/Search/issues/284))
 
 ## 1.0.3 — 24 September 2026
 
