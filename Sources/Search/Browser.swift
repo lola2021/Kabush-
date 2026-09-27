@@ -1323,6 +1323,13 @@ final class Browser: NSObject, ObservableObject {
         } else {
             Tab(bench: tab.bench, configuration: page)
         }
+        // Preserve the sign-in popup's link to the page that opened it —
+        // and, since a website can now start the swap, what you made of the
+        // tab: a pinned one stays pinned, a named one keeps its name.
+        fresh.opener = tab.opener
+        fresh.popup = tab.popup
+        fresh.pin = tab.pin
+        fresh.name = tab.name
         prepare(fresh)
         let wasActive = activeID == tab.id
         tabs[index] = fresh
@@ -1947,6 +1954,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        // A website returning to a public extension page needs another view.
+        if #available(macOS 15.4, *), routeExtensionReturn(action, from: webView) {
+            decisionHandler(.cancel)
+            return
+        }
+
         // An extension's page sending its own tab to a website (see
         // replace(_:going:)).
         if #available(macOS 15.4, *), ["http", "https"].contains(scheme),
@@ -2011,6 +2024,49 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             decisionHandler(.cancel)
             handOff(url, scheme: scheme, action: action, from: webView)
         }
+    }
+
+    /// Unlike tabs.update(), a website's navigation must be checked against
+    /// web_accessible_resources before using an extension view.
+    @available(macOS 15.4, *)
+    private func routeExtensionReturn(_ action: WKNavigationAction, from webView: WKWebView) -> Bool {
+        guard let tab = tab(for: webView) else { return false }
+        let source = tab.extensionReturn.source(for: action)
+        guard let requested = action.request.url else { return false }
+        let target = Extensions.current(requested)
+        guard target.scheme == Extensions.scheme, let source else { return false }
+        return handOverExtensionReturn(target, source: source, from: webView, tab: tab)
+    }
+
+    @available(macOS 15.4, *)
+    private func handOverExtensionReturn(_ target: URL, source: URL, from webView: WKWebView, tab: Tab) -> Bool {
+        guard !tab.shy,
+              let context = Extensions.shared.controller.extensionContext(for: target),
+              context.isLoaded, context.webViewConfiguration != nil,
+              ExtensionRedirectPolicy.allows(target: target, sourceOrigin: source, manifest: context.webExtension.manifest)
+        else { return false }
+        let revision = tab.extensionReturn.revision
+        DispatchQueue.main.async { [weak self, weak tab, weak webView] in
+            guard let self, let tab, let webView,
+                  self.tab(for: webView)?.id == tab.id,
+                  tab.extensionReturn.revision == revision else { return }
+            self.replace(tab, going: target)
+        }
+        return true
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation else { return }
+        tab(for: webView)?.extensionReturn.started(navigation, at: webView.url)
+    }
+
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        guard let navigation, let tab = tab(for: webView) else { return }
+        let redirect = tab.extensionReturn.redirected(navigation, to: webView.url)
+        guard let redirect, #available(macOS 15.4, *),
+              handOverExtensionReturn(Extensions.current(redirect.target), source: redirect.source, from: webView, tab: tab)
+        else { return }
+        webView.stopLoading()
     }
 
     /// An address for another app — mail, a call, a meeting. Only the page
@@ -2161,6 +2217,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        tab(for: webView)?.extensionReturn.finished(navigation)
         fail(webView, error)
     }
 
@@ -2169,6 +2226,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        tab(for: webView)?.extensionReturn.finished(navigation)
         fail(webView, error)
     }
 
@@ -2193,6 +2251,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
         tab.didCommit()
+        tab.extensionReturn.finished(navigation)
         if tab.id == activeID { linkStatus.dismiss() }
         tab.failure = nil
         tab.typing = false
