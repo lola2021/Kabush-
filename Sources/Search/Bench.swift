@@ -542,6 +542,9 @@ final class Bench {
                 "sideWidth": Double(browser.prefs.sideWidth),
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
                 "key": NSApp.keyWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
+                // What the keyboard goes to in the key window, or the browser's: a find field,
+                // a page, or a button it shouldn't be.
+                "responder": (NSApp.keyWindow ?? Links.window)?.firstResponder.map { "\(type(of: $0))" } ?? "",
             ]
             out["windows"] = NSApp.windows.map { window -> [String: Any] in
                 [

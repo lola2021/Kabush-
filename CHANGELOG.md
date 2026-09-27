@@ -109,6 +109,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A tab no longer wears another site's icon: an icon still on its way from the site the tab has just left is not put on it, the www. and bare address of a site share one, and an icon a page names by a relative path is found. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#216](https://github.com/driceroland/Search/pull/216), [#181](https://github.com/driceroland/Search/issues/181))
 - An extension's shortcut keeps to keys Search doesn't use: one its manifest asks for that is the Mac's, or one of Search's commands has, is left without a key, as in Chrome, and can be given another in Settings › Shortcuts.
 - Bringing things over from a damaged Firefox or Zen profile ends with a message rather than closing Search, and a folder or ZIP is read only as deep as Safari's own export goes.
+- ⌘F puts the keyboard in the find field every time, where with the Mac's keyboard navigation on it could land on the back button until ⌘F was pressed again, and closing the find bar hands the keyboard back to the page. ([#172](https://github.com/driceroland/Search/issues/172))
 
 ## 1.0.3 — 24 September 2026
 

@@ -205,6 +205,12 @@ final class Browser: NSObject, ObservableObject {
         // There is no public way to call off a find, but letting go of the
         // selection is what taking the highlight away amounts to.
         active?.web.evaluateJavaScript("window.getSelection().removeAllRanges()")
+        // The keyboard back to the page, as in Safari. Left with the window,
+        // the Mac's keyboard navigation handed it to the first button next.
+        if let web = active?.built, let window = web.window,
+           window.firstResponder === window || window.firstResponder is NSText {
+            window.makeFirstResponder(web)
+        }
     }
 
     func look(forward: Bool) {
