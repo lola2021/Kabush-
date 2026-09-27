@@ -942,7 +942,7 @@ final class Extensions: NSObject, ObservableObject {
         await ask("asks for more access", detail: names, context: context)
     }
 
-    private func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
+    func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
         await ask(
             "\(context.webExtension.displayName ?? "An extension") \(question)",
             detail: detail, icon: context.webExtension.icon(for: CGSize(width: 64, height: 64)),
@@ -1020,8 +1020,15 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
+    /// When you last clicked each extension's button or its line in the
+    /// menu: a permissions.request made from that click is one you asked
+    /// for, even once WebKit no longer sees the click (see
+    /// ExtensionShims, "permissions.afterClick").
+    static var clicked: [String: Date] = [:]
+
     func press(_ id: String) {
         guard let context = contexts[id], !ExtensionPopup.shared.closes(id) else { return }
+        Extensions.clicked[id] = Date()
         if let tab = activeAdapter { context.userGesturePerformed(in: tab) }
         // An extension that asked for its button to open its side panel.
         if ExtensionShims.panelOnClick.contains(id), context.action(for: activeAdapter)?.presentsPopup != true {

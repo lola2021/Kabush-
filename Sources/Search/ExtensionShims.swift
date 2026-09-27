@@ -1887,7 +1887,12 @@ enum ExtensionShims {
             const missing = mine.filter((m) => !have.has(m));
             if (missing.length && !(await native("permissions.request", [missing]))) return false;
           }
-          return theirs.length || origins.length ? request({ permissions: theirs, origins }) : true;
+          if (!theirs.length && !origins.length) return true;
+          // Asked from a click on the extension's button: when filling in
+          // the tab it was given (mend) cost WebKit the click, Search
+          // knows it was one and asks the same question.
+          return Promise.resolve(request({ permissions: theirs, origins })).catch((e) =>
+            /user gesture/i.test(String(e && e.message)) ? native("permissions.afterClick", [theirs, origins]) : Promise.reject(e));
         }));
         put(p, "getAll", (callback) => {
           const pr = (async () => {
@@ -3287,6 +3292,37 @@ enum ExtensionShims {
             guard yes else { return false }
             let had = Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
             Store.settings.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")
+            return true
+        case "permissions.afterClick":
+            // permissions.request for WebKit's own permissions and sites,
+            // made from a click on the extension's button whose moment
+            // WebKit lost while the shim filled in the tab it was given
+            // (see `mend`). Only within seconds of that click, once, and
+            // only what the manifest names, asked as WebKit would ask it.
+            guard let when = Extensions.clicked[id], Date().timeIntervalSince(when) < 10 else {
+                throw Unsupported(what: "Invalid call to permissions.request(). Must be called during a user gesture.")
+            }
+            Extensions.clicked[id] = nil
+            let found = context.webExtension
+            let wanted = ((first as? [String]) ?? []).map { WKWebExtension.Permission(rawValue: $0) }
+            let origins = ((args.dropFirst().first as? [String]) ?? []).compactMap { try? WKWebExtension.MatchPattern(string: $0) }
+            let named = found.requestedPermissions.union(found.optionalPermissions)
+            // Sites as the manifest names them, optional ones included —
+            // which allRequestedMatchPatterns leaves out.
+            let places = Set(found.allRequestedMatchPatterns.union(found.optionalPermissionMatchPatterns).map(\.string))
+            guard wanted.allSatisfy(named.contains), origins.allSatisfy({ places.contains($0.string) }) else {
+                throw Unsupported(what: "Only permissions specified in the manifest may be requested.")
+            }
+            let missing = wanted.filter { context.permissionStatus(for: $0) != .grantedExplicitly }
+            let unreached = origins.filter { context.permissionStatus(for: $0) != .grantedExplicitly }
+            guard !missing.isEmpty || !unreached.isEmpty else { return true }
+            let every = unreached.contains { $0.matchesAllHosts || $0.matchesAllURLs }
+            let sites = every ? "every website" : unreached.map(\.string).sorted().joined(separator: ", ")
+            let question = unreached.isEmpty ? "asks for more access" : "wants to read and change \(sites)"
+            let detail = missing.isEmpty ? "Until you remove the extension." : missing.map(\.rawValue).sorted().joined(separator: ", ")
+            guard await owner.ask(question, detail: detail, context: context) else { return false }
+            for permission in missing { context.setPermissionStatus(.grantedExplicitly, for: permission) }
+            for pattern in unreached { context.setPermissionStatus(.grantedExplicitly, for: pattern) }
             return true
         case "permissions.remove":
             let gone = Set((first as? [String]) ?? [])

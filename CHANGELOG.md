@@ -72,6 +72,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- The Figma extension's button works once you're signed in: it asks, as in Chrome, to read and change every website, and when you agree its toolbar opens on the page. An extension asking for more access from a click on its button had the question refused, since the click was lost on the way; the question now comes, only right after such a click and only for what the extension named when it was installed.
 - The pinned tab you are on stands out among the other pins, in a darker grey, in the sidebar and across the top, light or dark; it barely showed against the others' grey.
 - Switching to another app while a video plays full screen no longer leaves Search's window black when you come back: the video stays full screen in its own space, as in Safari, instead of floating out of it. Thanks [@dttdrv](https://github.com/dttdrv) ([#372](https://github.com/driceroland/Search/pull/372))
 - Unpinning a tab puts it back among the tabs every time. Unpinning the only tab, or the last pin, could leave an empty square where the pin was and no row for the tab, until something else changed the column.
