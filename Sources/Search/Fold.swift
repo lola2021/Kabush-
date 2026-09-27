@@ -80,8 +80,11 @@ struct Fold: View {
             // double-click to fill the screen: only the column's own corner,
             // gone when folded. A band too thin to be in a page's way stands
             // in for the title bar along the whole top; the column lies over
-            // it with its own.
-            if prefs.sidebar, browser.active?.immersed != true {
+            // it with its own. The strip across the top, folded away, leaves
+            // the page the top edge too, and the same band: there was nothing
+            // to take hold of until the strip came down. Unfolded, the strip
+            // is its own title bar, and no band lies over its tabs.
+            if prefs.sidebar || folding, browser.active?.immersed != true {
                 DragStrip()
                     .frame(height: Fold.top)
                     .frame(maxWidth: .infinity)

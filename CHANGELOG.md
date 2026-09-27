@@ -47,6 +47,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- With the tab bar folded away, the window can be moved from a thin band along its top edge, and filled with a double-click there, as with the sidebar folded away; there was nothing to take hold of until the bar came down.
 - A middle-click opens a link in a new tab on pages that stop the click on its way up, where it opened nothing; a page that takes the middle-click for itself still keeps it, as in Chrome.
 - Updates can only come from Office Commun: the file that names each new version is now signed with the same Developer ID as the app, and a version it names is fetched only if that signature holds up. When the app can't replace itself and offers the disk image, Search downloads it itself and opens it only if its hash is the signed one and its signature is Office Commun's.
 - With the caret in a sign-in box, scrolling no longer asks the keychain for your accounts on every frame, nor redraws the window each time: the accounts are looked up once per box, and the list only moves with it. The list also takes a click again while the page scrolls; each frame had started its half-second guard over.
