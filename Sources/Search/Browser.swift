@@ -14,6 +14,10 @@ final class Browser: NSObject, ObservableObject {
             // The tab just left is the tab just looked at. Whether a tab has
             // gone unwatched long enough to sleep is counted from here, not
             // from when it was first picked.
+            // A question the page asked while it was in the background.
+            if let id = activeID, id != oldValue, let held = heldDialogs.removeValue(forKey: id) {
+                DispatchQueue.main.async { held.forEach { $0.present() } }
+            }
             guard oldValue != activeID, let old = oldValue else { return }
             linkStatus.dismiss()
             tabs.first { $0.id == old }?.touch()
@@ -713,6 +717,9 @@ final class Browser: NSObject, ObservableObject {
     var pressure: DispatchSourceMemoryPressure?
     /// Downloads still under way. See `keep(_:)`.
     var downloading: [WKDownload] = []
+    /// alert(), confirm() and prompt() from tabs that weren't in front,
+    /// waiting for them to be (see Dialogs.swift).
+    var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
     /// The Chrome Web Store's pages, told when installs come and go. See StoreRelay.swift.
     var storeWatch: AnyCancellable?
     private var hush: DispatchWorkItem?
@@ -1112,6 +1119,7 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
 
         // A tab whose page is out in the little window takes the window with
         // it. Left alone, the window would go on holding a page belonging to a
