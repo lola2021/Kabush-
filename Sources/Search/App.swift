@@ -1340,17 +1340,28 @@ private struct TabImmersionWatch: View {
     }
 }
 
-/// Check for Updates…, or Restart to Update once a newer build is in place.
+/// The update command, as the updater stands: Check for Updates…, Install
+/// Update when installing on its own is off, Download Update… when it
+/// couldn't install itself, Restart to Update once a newer build is in place.
 /// Its own view, so only the updater's changes redraw it (see SearchApp.body).
 private struct UpdateMenuItem: View {
     @ObservedObject private var updater = Updater.shared
 
     var body: some View {
-        if case .ready = updater.stage {
-            Button("Restart to Update") { updater.relaunch() }
-        } else {
-            Button("Check for Updates…") { updater.checkByHand() }
+        switch updater.stage {
+        case .none:
+            Button(updater.checking ? "Checking for Updates…" : "Check for Updates…") { updater.checkByHand() }
                 .disabled(updater.checking)
+        case .waiting:
+            Button("Install Update") { updater.install() }
+        case .fetching:
+            Button("Downloading Update…") {}
+                .disabled(true)
+        case .ready:
+            Button("Restart to Update") { updater.relaunch() }
+        case .offered:
+            Button(updater.fetchingDisk ? "Downloading Update…" : "Download Update…") { updater.openDisk() }
+                .disabled(updater.fetchingDisk)
         }
     }
 }
