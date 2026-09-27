@@ -2329,6 +2329,10 @@ final class Bench {
                     "left": short(pair.left),
                     "right": short(pair.right),
                     "fraction": pair.fraction,
+                    "tabs": pair.tabs.map { short($0) },
+                    "sizes": pair.sizes,
+                    "axis": pair.axis.rawValue,
+                    "focused": short(pair.focused),
                 ] as [String: Any]
             },
             "activeID": short(browser.activeID),

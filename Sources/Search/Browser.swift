@@ -53,10 +53,15 @@ final class Browser: NSObject, ObservableObject {
             linkStatus.dismiss()
             let left = tabs.first { $0.id == old }
             left?.touch()
-            if let pair = splits.first(where: { $0.contains(old) }),
+            if prefs.splitView, let pair = splits.first(where: { $0.contains(old) }),
                activeID.map({ !pair.contains($0) }) ?? true,
-               let partner = tabs.first(where: { $0.id == (pair.left == old ? pair.right : pair.left) }) {
+               let partner = tabs.first(where: { $0.id == pair.partner(of: old) }) {
                 partner.touch()
+            }
+            // The page to come back to, when the pair is chosen again.
+            if prefs.splitView, let id = activeID,
+               let index = splits.firstIndex(where: { $0.contains(id) }), splits[index].focused != id {
+                splits[index].focused = id
             }
             // The switcher's order and pictures, most recently used first.
             tabSwitcher.cancel()
@@ -69,17 +74,41 @@ final class Browser: NSObject, ObservableObject {
         return splits.first { $0.contains(activeID) }
     }
 
-    func split(for tab: Tab) -> TabSplit? { splits.first { $0.contains(tab.id) } }
+    /// The pair a tab is in, while Split View is on. Turned off, pairs are
+    /// kept, as groups are, and nothing acts on them until it is back on.
+    func split(for tab: Tab) -> TabSplit? {
+        guard prefs.splitView else { return nil }
+        return splits.first { $0.contains(tab.id) }
+    }
+
+    /// Whether a tab has a place of its own in the row: any tab but a
+    /// pair's later pages, which share the first one's.
+    func standsInRow(_ tab: Tab) -> Bool {
+        split(for: tab).map { $0.left == tab.id } ?? true
+    }
 
     var displayedTabs: [Tab] {
         guard prefs.splitView else { return tabs }
-        return tabs.filter { tab in !splits.contains { $0.right == tab.id } }
+        return tabs.filter { tab in !splits.contains { $0.contains(tab.id) && $0.left != tab.id } }
     }
 
     var visibleTabIDs: Set<Tab.ID> {
         guard let activeID else { return [] }
         guard let pair = activeSplit else { return [activeID] }
-        return [pair.left, pair.right]
+        return Set(pair.tabs)
+    }
+
+    /// Whether a pair can stand as it is in a row: all its tabs there, next
+    /// to each other in its order, none pinned, of one kind and one group.
+    /// A pair kept while Split View was off may have come apart since.
+    static func holds(_ pair: TabSplit, in row: [Tab]) -> Bool {
+        let places = pair.tabs.compactMap { id in row.firstIndex { $0.id == id } }
+        guard pair.tabs.count >= 2, places.count == pair.tabs.count, let first = places.first,
+              places == Array(first..<first + places.count) else { return false }
+        let members = places.map { row[$0] }
+        return members.allSatisfy { tab in
+            tab.pin == nil && !tab.bench && tab.shy == members[0].shy && tab.groupID == members[0].groupID
+        }
     }
 
     let tabSwitcher = TabSwitcher()
@@ -1476,17 +1505,13 @@ final class Browser: NSObject, ObservableObject {
         prefs.$splitView
             .dropFirst()
             .sink { [weak self] on in
-                guard let self, !on else { return }
-                splits = []
+                // Off, the pairs stay, as groups do; back on, the ones that
+                // came apart meanwhile go. The others' files are looked at
+                // when their spaces come back (see restoreRow).
+                guard let self, on else { return }
+                splits = splits.filter { Browser.holds($0, in: self.tabs) }
                 for key in parked.keys {
-                    parked[key]?.splits = []
-                }
-                for space in spaces where space.id != spaceID {
-                    var row = readRow(space.id)
-                    if !row.splits.isEmpty {
-                        row.splits = []
-                        writeRow(space.id, row, now: true)
-                    }
+                    if let row = parked[key] { parked[key]?.splits = row.splits.filter { Browser.holds($0, in: row.tabs) } }
                 }
                 writeSession(now: true)
             }
@@ -1683,13 +1708,13 @@ final class Browser: NSObject, ObservableObject {
                 if activeID == nil { newTab() }
             }
             splits.removeAll { pair in
-                !tabs.contains(where: { $0.id == pair.left }) || !tabs.contains(where: { $0.id == pair.right })
+                !pair.tabs.allSatisfy { id in tabs.contains { $0.id == id } }
             }
             writeRow(spaceID, session(tabs, active: activeID, groups: tabGroups, splits: splits), now: false)
         } else if var row = parked[space] {
             row.tabs = reconcilePins(row.tabs, space: space)
             row.splits.removeAll { pair in
-                !row.tabs.contains(where: { $0.id == pair.left }) || !row.tabs.contains(where: { $0.id == pair.right })
+                !pair.tabs.allSatisfy { id in row.tabs.contains { $0.id == id } }
             }
             if !row.tabs.contains(where: { $0.id == row.active }) { row.active = row.tabs.first?.id }
             parked[space] = row
@@ -1886,12 +1911,11 @@ final class Browser: NSObject, ObservableObject {
         var active = 0
         var indices: [Tab.ID: Int] = [:]
         for tab in tabs {
-            guard kept(tab, splits: splits) else { continue }
-            let url = (tab.pending ?? tab.address)?.absoluteString ?? "about:blank"
+            guard kept(tab), let url = tab.pending ?? tab.address else { continue }
             if tab.id == id { active = entries.count }
             indices[tab.id] = entries.count
             entries.append(Session.Entry(
-                url: url, title: tab.title, pin: tab.pin, name: tab.name,
+                url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name,
                 home: tab.pin == nil ? nil : tab.home?.absoluteString, groupID: tab.groupID,
                 pinID: tab.pin == nil ? nil : tab.pinID
             ))
@@ -1899,14 +1923,19 @@ final class Browser: NSObject, ObservableObject {
         // The tab you were on isn't kept — a private or blank one: the one
         // kept just before it comes back in front, not the first of the row.
         if let id, let at = tabs.firstIndex(where: { $0.id == id }), indices[id] == nil {
-            active = max(0, tabs[..<at].filter { kept($0, splits: splits) }.count - 1)
+            active = max(0, tabs[..<at].filter(kept).count - 1)
         }
         let keptGroups = groups?.filter { group in
             entries.contains { $0.groupID == group.id }
         }
+        // Only a pair that is whole in the file: one with an empty page, or
+        // a private one, isn't written, and its other page comes back alone.
         let savedSplits = splits.compactMap { pair -> Session.Split? in
-            guard let left = indices[pair.left], let right = indices[pair.right], right == left + 1 else { return nil }
-            return Session.Split(left: left, right: right, fraction: pair.fraction)
+            let places = pair.tabs.compactMap { indices[$0] }
+            guard places.count == pair.tabs.count, places.count >= 2,
+                  places == Array(places[0]..<places[0] + places.count) else { return nil }
+            return Session.Split(tabs: places, axis: pair.axis, sizes: pair.sizes,
+                                 focused: pair.focused.flatMap { indices[$0] })
         }
         return .init(tabs: entries, active: active, groups: keptGroups, splits: savedSplits)
     }
@@ -1914,11 +1943,10 @@ final class Browser: NSObject, ObservableObject {
     /// Whether a tab goes into the session: not a private one or the
     /// bench's, and only with a web address. A sleeping view is blank, so
     /// `pending` must win or its page will disappear from the next session.
-    private func kept(_ tab: Tab, splits: [TabSplit] = []) -> Bool {
+    private func kept(_ tab: Tab) -> Bool {
         // A tab holding an extension's sign-in answer (Tab.hold) carries its
         // code in the address: that is never written down.
-        !tab.shy && !tab.bench && tab.held == nil && ((tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
-            || (tab.isBlank && splits.contains { $0.contains(tab.id) }))
+        !tab.shy && !tab.bench && tab.held == nil && (tab.pending ?? tab.address)?.scheme?.hasPrefix("http") == true
     }
 
     /// Another space's row. Its groups are the ones in its own file, the
@@ -1970,7 +1998,7 @@ final class Browser: NSObject, ObservableObject {
         row.insert(dragged, at: onLeft ? index : index + 1)
         let left = onLeft ? dragged : target
         let right = onLeft ? target : dragged
-        splits.append(TabSplit(left: left.id, right: right.id))
+        splits.append(TabSplit(tabs: [left.id, right.id], focused: dragged.id))
         tabs = row
         removeEmptyGroup(oldGroup)
         focusPane(dragged)
@@ -1997,7 +2025,7 @@ final class Browser: NSObject, ObservableObject {
         prepare(right)
         right.groupID = current.groupID
         guard let index = tabs.firstIndex(where: { $0.id == current.id }) else { return }
-        splits.append(TabSplit(left: current.id, right: right.id))
+        splits.append(TabSplit(tabs: [current.id, right.id], focused: right.id))
         tabs.insert(right, at: index + 1)
         focusPane(right)
         editing = true
@@ -2016,9 +2044,9 @@ final class Browser: NSObject, ObservableObject {
     /// the drag itself is followed by the stage alone (see BrowserStage).
     func setSplitFraction(_ id: UUID, fraction: Double) {
         guard fraction.isFinite, let index = splits.firstIndex(where: { $0.id == id }) else { return }
-        let fraction = min(0.8, max(0.2, fraction))
-        guard splits[index].fraction != fraction else { return }
-        splits[index].fraction = fraction
+        let sizes = TabSplit.clamp([fraction, 1 - fraction])
+        guard splits[index].sizes != sizes else { return }
+        splits[index].sizes = sizes
         rememberSession()
     }
 
@@ -2532,7 +2560,7 @@ final class Browser: NSObject, ObservableObject {
     /// Reorder only among peers in the displayed section. The underlying
     /// tab row remains flat for keyboard shortcuts and the top strip.
     func move(_ tab: Tab, within group: UUID?, to index: Int) {
-        let peers = tabs(in: group).filter { split(for: $0)?.right != $0.id }
+        let peers = tabs(in: group).filter(standsInRow)
         guard let from = peers.firstIndex(where: { $0.id == tab.id }),
               peers.indices.contains(index), from != index,
               let destination = tabs.firstIndex(where: { $0.id == peers[index].id }) else { return }
@@ -2558,9 +2586,8 @@ final class Browser: NSObject, ObservableObject {
         let grouped = tabGroups.flatMap { group in representatives.filter { self.group(of: $0) == group.id } }
         let ungrouped = representatives.filter { $0.pin == nil && group(of: $0) == nil }
         let order = (pins + grouped + ungrouped).flatMap { tab -> [Tab] in
-            guard let pair = split(for: tab), pair.left == tab.id,
-                  let right = tabs.first(where: { $0.id == pair.right }) else { return [tab] }
-            return [tab, right]
+            guard let pair = split(for: tab), pair.left == tab.id else { return [tab] }
+            return pair.tabs.compactMap { id in tabs.first { $0.id == id } }
         }
         // Setting the row runs this again, which then finds nothing to do.
         guard !order.elementsEqual(tabs, by: { $0.id == $1.id }) else { return }
@@ -2582,7 +2609,7 @@ final class Browser: NSObject, ObservableObject {
     /// is in there, so the page on screen always has its place in the row.
     func visibleTabs(in group: TabGroup) -> [Tab] {
         let members = tabs(in: group.id)
-        let shown = members.filter { split(for: $0)?.right != $0.id }
+        let shown = members.filter(standsInRow)
         return group.collapsed ? shown.filter { $0.id == (activeSplit?.left ?? activeID) } : shown
     }
 
@@ -2600,7 +2627,7 @@ final class Browser: NSObject, ObservableObject {
         guard prefs.usesTabGroups else { return displayedTabs }
         return displayedTabs.filter { $0.pin != nil }
             + tabGroups.flatMap { visibleTabs(in: $0) }
-            + tabs(in: nil).filter { split(for: $0)?.right != $0.id }
+            + tabs(in: nil).filter(standsInRow)
     }
 
     /// ⌃Tab, ⌃⇧Tab: the next tab on screen, round to the first again. It
@@ -2885,12 +2912,12 @@ final class Browser: NSObject, ObservableObject {
         var row: [Tab] = []
         var bySavedIndex: [Int: Tab] = [:]
         for (savedIndex, entry) in saved.tabs.enumerated() {
-            guard let url = URL(string: entry.url) else { continue }
-            let blank = entry.url == "about:blank"
-            if blank && !saved.splits.contains(where: { $0.left == savedIndex || $0.right == savedIndex }) { continue }
+            // An empty page is never written; the first builds of Split View
+            // on main wrote one for an empty half.
+            guard let url = URL(string: entry.url), entry.url != "about:blank" else { continue }
             let tab = Tab(configuration: Web.configuration(space: space))
             prepare(tab)
-            if !blank { tab.restore(url: url, title: entry.title, name: entry.name) }
+            tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
             tab.pinID = entry.pin == nil ? nil : entry.pinID
             tab.home = Browser.home(of: entry, at: url)
@@ -2901,25 +2928,19 @@ final class Browser: NSObject, ObservableObject {
         }
         let said = bySavedIndex[saved.active]?.id
         row = reconcilePins(row, space: space)
+        // Pairs, whether Split View is on or not: off, they wait, as groups
+        // do. Each tab in one pair at most, and only a pair that still holds.
         var restoredSplits: [TabSplit] = []
         var taken = Set<Tab.ID>()
-        if prefs.splitView {
-            for pair in saved.splits {
-                guard let left = bySavedIndex[pair.left], let right = bySavedIndex[pair.right],
-                      !taken.contains(left.id), !taken.contains(right.id),
-                      left.pin == nil, right.pin == nil, left.shy == right.shy,
-                      left.groupID == right.groupID,
-                      let leftIndex = row.firstIndex(where: { $0.id == left.id }),
-                      let rightIndex = row.firstIndex(where: { $0.id == right.id }), rightIndex == leftIndex + 1 else { continue }
-                restoredSplits.append(TabSplit(left: left.id, right: right.id, fraction: pair.fraction))
-                taken.insert(left.id)
-                taken.insert(right.id)
-            }
+        for saved in saved.splits {
+            let members = saved.tabs.compactMap { bySavedIndex[$0] }
+            guard members.count == saved.tabs.count, !members.contains(where: { taken.contains($0.id) }) else { continue }
+            let pair = TabSplit(tabs: members.map(\.id), axis: saved.axis, sizes: saved.sizes,
+                                focused: saved.focused.flatMap { bySavedIndex[$0]?.id })
+            guard Browser.holds(pair, in: row) else { continue }
+            restoredSplits.append(pair)
+            taken.formUnion(pair.tabs)
         }
-        let paired = Set(restoredSplits.flatMap { [$0.left, $0.right] })
-        let staleBlanks = row.filter { $0.pin == nil && $0.isBlank && !paired.contains($0.id) }
-        for tab in staleBlanks { tab.close() }
-        row.removeAll { $0.pin == nil && $0.isBlank && !paired.contains($0.id) }
         let active = said.flatMap { id in row.contains { $0.id == id } ? id : nil }
         return Parked(tabs: row, active: active, splits: restoredSplits)
     }
@@ -2927,7 +2948,7 @@ final class Browser: NSObject, ObservableObject {
     /// Another space's row put on screen in place of this one (see
     /// Spaces.swift) — empty, for one that restores its own.
     func showRow(_ row: [Tab], active: Tab.ID?, splits restored: [TabSplit] = []) {
-        splits = prefs.splitView ? restored : []
+        splits = restored
         tabs = row
         activeID = active ?? row.first?.id
     }
@@ -2955,7 +2976,7 @@ final class Browser: NSObject, ObservableObject {
 
     private func safeInsertionIndex(_ proposed: Int) -> Int {
         let index = min(max(0, proposed), tabs.count)
-        guard index < tabs.count, splits.contains(where: { $0.right == tabs[index].id }) else { return index }
+        guard index < tabs.count, split(for: tabs[index]).map({ $0.left != tabs[index].id }) == true else { return index }
         return index + 1
     }
 
