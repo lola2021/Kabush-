@@ -1592,6 +1592,12 @@ final class Browser: NSObject, ObservableObject {
         writeSession(now: true)
     }
 
+    /// Groups some tabs just left, gone if none is left in them: a group
+    /// lasts as long as its tabs.
+    func dropEmptyGroups(_ ids: Set<UUID>) {
+        for id in ids where tabs(in: id).isEmpty { removeTabGroup(id) }
+    }
+
     /// The row in the order it is shown: the pins, each group's tabs in the
     /// groups' order, then the tabs in none. The one place that order is
     /// made, run after every change to the row (see `tabs`) and to a group.
