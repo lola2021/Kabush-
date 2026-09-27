@@ -35,6 +35,7 @@ in [ROADMAP.md](ROADMAP.md).
 - An extension's popup window, such as a password manager's vault or an extension's sign-in, opens as a small window of its page, at the size the extension asks for, with the site over it, instead of as another whole browser window. ⌘W closes it; it isn't brought back with the other windows after a restart, and it closes when its extension is turned off or removed. NordPass's vault and Affinity's Connect open this way.
 - In full screen, the tabs across the top and the back, forward and reload buttons in the column start at the edge, where an empty corner was kept for the window's buttons that macOS takes away there.
 - Copy Image works on pictures a page makes itself, such as the photos in WhatsApp Web: it said it couldn't copy them, since they only exist inside the page, and they are now read there.
+- A pinned tab you drag to another place keeps up with the pointer, as a tab does: each move of the hand redrew the whole column.
 
 ## 1.0.4 — 27 September 2026
 

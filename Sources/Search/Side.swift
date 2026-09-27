@@ -24,10 +24,7 @@ struct SideBar: View {
     @Namespace private var before
     @Namespace private var after
 
-    @State private var pinDragging: Tab.ID?
     @State private var groupFrames: [UUID: CGRect] = [:]
-    @State private var pinFrom = 0
-    @State private var pinTravel: CGSize = .zero
 
     private static let row: CGFloat = 28
     private static let gap: CGFloat = 2
@@ -369,7 +366,6 @@ struct SideBar: View {
         // would shuttle between two cells for as long as the finger stayed.
         return VStack(spacing: 0) { PinGrid(cells: cells) {
             ForEach(Array(tabs.enumerated()), id: \.element.id) { index, tab in
-                let held = pinDragging == tab.id
                 PinSquare(
                     browser: browser,
                     prefs: prefs,
@@ -379,66 +375,13 @@ struct SideBar: View {
                     width: cells[index].width,
                     height: cells[index].height
                 )
-                .offset(pinOffset(held: held, index: index, cells: cells))
-                // Under the hand exactly, as a row is (see the rows below).
-                .transaction { if held { $0.animation = nil } }
-                .zIndex(held ? 1 : 0)
-                .shadow(color: .black.opacity(held ? 0.16 : 0), radius: 10, y: 3)
-                .gesture(pinReorder(tab: tab, index: index, cells: cells))
+                // The hand's travel is the square's own, as a row's is
+                // (Carried): a move redraws the one square being carried,
+                // not the column (idea 31).
+                .modifier(PinCarried(index: index, cells: cells) { browser.move(tab, to: $0) })
             }
         } }
         .coordinateSpace(name: "pins")
-    }
-
-    /// The one square actually held stays glued to the fingers; every other
-    /// square is already exactly where it belongs, because `browser.move`
-    /// put it there — this only cancels out the bit of that same movement
-    /// the held square already got for free by changing index underneath
-    /// its own drag.
-    private func pinOffset(held: Bool, index: Int, cells: [CGRect]) -> CGSize {
-        guard held, cells.indices.contains(pinFrom), cells.indices.contains(index) else { return .zero }
-        let from = cells[pinFrom], now = cells[index]
-        return CGSize(
-            width: pinTravel.width - (now.midX - from.midX),
-            height: pinTravel.height - (now.midY - from.midY)
-        )
-    }
-
-    /// The cell the held square is over: the one whose centre is nearest to
-    /// where the fingers have taken the square's own centre. Rows of
-    /// different lengths have cells of different widths, so a count of
-    /// steps along one axis would land in the wrong one.
-    private func pinTarget(cells: [CGRect]) -> Int {
-        guard cells.indices.contains(pinFrom) else { return 0 }
-        let start = cells[pinFrom]
-        let point = CGPoint(x: start.midX + pinTravel.width, y: start.midY + pinTravel.height)
-        func distance(_ cell: CGRect) -> CGFloat { hypot(cell.midX - point.x, cell.midY - point.y) }
-        return cells.indices.min { distance(cells[$0]) < distance(cells[$1]) } ?? pinFrom
-    }
-
-    /// Pick a square up and the others make way — across a row, and down
-    /// into the next, exactly as far as the fingers actually moved.
-    private func pinReorder(tab: Tab, index: Int, cells: [CGRect]) -> some Gesture {
-        DragGesture(minimumDistance: 5, coordinateSpace: .named("pins"))
-            .onChanged { value in
-                if pinDragging != tab.id {
-                    pinDragging = tab.id
-                    pinFrom = index
-                }
-                pinTravel = value.translation
-                let target = pinTarget(cells: cells)
-                if target != index {
-                    withAnimation(Motion.settle) {
-                        browser.move(tab, to: target)
-                    }
-                }
-            }
-            .onEnded { _ in
-                withAnimation(Motion.settle) {
-                    pinDragging = nil
-                    pinTravel = .zero
-                }
-            }
     }
 
     // MARK: - the rows
@@ -864,5 +807,72 @@ struct Door: View {
         .help(help)
         .animation(Motion.quick, value: hovering)
         .animation(Motion.quick, value: on)
+    }
+}
+
+/// A pinned square picked up and carried across the grid, its travel its
+/// own: only the square being carried redraws as the hand moves, and the
+/// grid only when it changes place.
+struct PinCarried: ViewModifier {
+    let index: Int
+    let cells: [CGRect]
+    let move: (Int) -> Void
+
+    @State private var held = false
+    @State private var from = 0
+    @State private var travel: CGSize = .zero
+
+    func body(content: Content) -> some View {
+        content
+            .offset(held ? PinCarried.offset(travel: travel, from: from, index: index, cells: cells) : .zero)
+            // Under the hand exactly, as a row is (see Carried).
+            .transaction { if held { $0.animation = nil } }
+            .zIndex(held ? 1 : 0)
+            .shadow(color: .black.opacity(held ? 0.16 : 0), radius: 10, y: 3)
+            // Measured in the grid's own space, not the square's: a square
+            // that has just been moved to a new cell would otherwise report
+            // the drag from where it now is, and shuttle between two cells.
+            .gesture(
+                DragGesture(minimumDistance: 5, coordinateSpace: .named("pins"))
+                    .onChanged { value in
+                        if !held {
+                            held = true
+                            from = index
+                        }
+                        travel = value.translation
+                        let target = PinCarried.target(travel: travel, from: from, cells: cells)
+                        if target != index {
+                            withAnimation(Motion.settle) { move(target) }
+                        }
+                    }
+                    .onEnded { _ in
+                        withAnimation(Motion.settle) {
+                            held = false
+                            travel = .zero
+                        }
+                    }
+            )
+    }
+
+    /// The held square stays glued to the fingers; every other square is
+    /// already where it belongs, because the move put it there. This only
+    /// takes off what the held square got for free by changing cell under
+    /// its own drag.
+    static func offset(travel: CGSize, from: Int, index: Int, cells: [CGRect]) -> CGSize {
+        guard cells.indices.contains(from), cells.indices.contains(index) else { return .zero }
+        let start = cells[from], now = cells[index]
+        return CGSize(width: travel.width - (now.midX - start.midX), height: travel.height - (now.midY - start.midY))
+    }
+
+    /// The cell the held square is over: the one whose centre is nearest to
+    /// where the fingers have taken the square's own centre. Rows of
+    /// different lengths have cells of different widths, so a count of
+    /// steps along one axis would land in the wrong one.
+    static func target(travel: CGSize, from: Int, cells: [CGRect]) -> Int {
+        guard cells.indices.contains(from) else { return 0 }
+        let start = cells[from]
+        let point = CGPoint(x: start.midX + travel.width, y: start.midY + travel.height)
+        func distance(_ cell: CGRect) -> CGFloat { hypot(cell.midX - point.x, cell.midY - point.y) }
+        return cells.indices.min { distance(cells[$0]) < distance(cells[$1]) } ?? from
     }
 }
