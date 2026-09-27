@@ -898,6 +898,13 @@ struct ContentView: View {
             || browser.active?.built?.inputContext != nil
     }
 
+    /// Whether the caret is in the window's address field: its field editor
+    /// answers to the field, and the field to AddressField (Omnibox.swift).
+    private static func inAddressField(_ window: NSWindow) -> Bool {
+        guard let editor = window.firstResponder as? NSTextView else { return false }
+        return (editor.delegate as? NSTextField)?.delegate is AddressField.Coordinator
+    }
+
     /// Whether the tab switcher can come up: in this window, with nothing
     /// over the page it would have to cover.
     private func canSwitchTabs(_ event: NSEvent) -> Bool {
@@ -1096,6 +1103,19 @@ struct ContentView: View {
 
         // Other shortcuts with ⌥ or ⌃ on top are somebody else's.
         guard !flags.contains(.option), !flags.contains(.control) else { return false }
+
+        // ⌘Return in the address field: what is typed there in a new tab,
+        // the one you are on left as it was, as in Safari; ⇧⌘Return goes to
+        // it. Here rather than in the field's delegate, which ⌘Return doesn't
+        // reliably reach. Only this window's own address field: ⌘Return in a
+        // page, the peek, or another box (Settings, History's search) is
+        // theirs as before.
+        if event.keyCode == 36 || event.keyCode == 76, browser.fieldShowing,
+           browser.editingTab == nil, let window, event.window === window,
+           ContentView.inAddressField(window) {
+            browser.submit(aside: true, front: shifted)
+            return true
+        }
 
         // ⌘1 through ⌘9, and ⌘0, by the key rather than the character it
         // types. On AZERTY and many other layouts the top row types &, é, "…
