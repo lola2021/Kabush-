@@ -56,17 +56,17 @@ struct PasswordsPanel: View {
                     Text("Bring in from")
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
-                    // Only the browsers actually on this Mac.
-                    ForEach(Chromium.installed()) { source in
+                    // Only the browsers on this Mac whose passwords can be read.
+                    ForEach(ImportSource.installed().filter(\.hasPasswords)) { source in
                         Pill(source.name) {
                             importing = source.name
                             // Off the main thread: four hundred passwords is a
                             // moment of arithmetic, and the panel stays alive.
                             DispatchQueue.global(qos: .userInitiated).async {
-                                let outcome = Result { try Chromium.read(source) }
+                                let outcome = Result { try source.read() }
                                 DispatchQueue.main.async {
                                     importing = nil
-                                    browser.took(outcome, from: source)
+                                    browser.took(outcome, from: source.name)
                                 }
                             }
                         }

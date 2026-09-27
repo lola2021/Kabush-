@@ -31,6 +31,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Bringing things over works from Helium too: its bookmarks, history and passwords. Thanks [@bacecek](https://github.com/bacecek) ([#178](https://github.com/driceroland/Search/pull/178))
 - Bringing things over works from Comet too. Thanks [@gabrielemeksiz-ui](https://github.com/gabrielemeksiz-ui) ([#301](https://github.com/driceroland/Search/pull/301))
 - Bringing things over also finds Chrome Beta, Chrome Dev and Chrome Canary, which keep their data apart from Chrome, and Opera and Opera GX.
+- Bringing things over works from Firefox and Zen too: their bookmarks and history, from every profile on this Mac. Passwords stay with the Chromium browsers for now. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#215](https://github.com/driceroland/Search/pull/215))
 
 ### Fixed
 

@@ -416,6 +416,338 @@ enum Chromium {
     }
 }
 
+// Reading what a Mozilla browser on this Mac holds: Firefox and Zen, and
+// anything else built on Gecko keeps the same shape. History and bookmarks
+// live together in one SQLite file, "places.sqlite", inside each profile
+// folder; the icons are in "favicons.sqlite" beside it. There are no
+// passwords here yet — those come in a later change. The files are read the
+// same way as a Chromium browser's: through a Snapshot, so the -wal is read
+// too and the browser's own copy is left alone.
+
+enum Mozilla {
+    struct Source: Identifiable, Hashable {
+        let name: String
+        /// Where profiles are looked for, under the same base as Chromium's,
+        /// so a test run reads made-up profiles from its own Import/ folder.
+        /// Firefox keeps them under "Firefox/Profiles"; Zen's folder has been
+        /// spelled a few ways over its life, so every one it has used is here.
+        let folders: [String]
+
+        var id: String { name }
+
+        /// Every profile's places.sqlite found on this Mac, newest first, so
+        /// the profile in use leads. A folder may point straight at a profile
+        /// or at a directory of them.
+        var files: [URL] {
+            var out: [URL] = []
+            for folder in folders {
+                let root = Chromium.base.appendingPathComponent(folder, isDirectory: true)
+                let direct = root.appendingPathComponent("places.sqlite")
+                if FileManager.default.fileExists(atPath: direct.path) { out.append(direct) }
+                let inside = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: .skipsHiddenFiles)) ?? []
+                for sub in inside {
+                    let places = sub.appendingPathComponent("places.sqlite")
+                    if FileManager.default.fileExists(atPath: places.path) { out.append(places) }
+                }
+            }
+            var seen = Set<String>()
+            return out.filter { seen.insert($0.path).inserted }.sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da > db
+            }
+        }
+    }
+
+    static let known: [Source] = [
+        Source(name: "Firefox", folders: ["Firefox/Profiles", "Firefox"]),
+        Source(name: "Zen", folders: ["zen/Profiles", "Zen/Profiles", "zen", "Zen"]),
+    ]
+
+    /// Only the Mozilla browsers with a profile to read.
+    static func installed() -> [Source] {
+        known.filter { !$0.files.isEmpty }
+    }
+
+    enum Trouble: Error {
+        case unreadable
+    }
+
+    // MARK: - what they kept
+
+    /// The other browser's bookmarks, every profile's run together; the merge
+    /// on the way in leaves out anything already here, so profiles that share
+    /// a page don't make two of it.
+    static func bookmarks(in source: Source) -> [Bookmark] {
+        var out: [Bookmark] = []
+        for file in source.files {
+            out += (try? bookmarkNodes(in: file)) ?? []
+        }
+        return out
+    }
+
+    private struct Raw {
+        let id: Int64
+        let type: Int
+        let parent: Int64
+        let title: String
+        let url: String?
+        let guid: String
+    }
+
+    /// Firefox keeps bookmarks as rows in moz_bookmarks pointing at pages in
+    /// moz_places, each with a parent, so the tree is rebuilt from the flat
+    /// list. The toolbar's pages come first at the top, then the menu's, then
+    /// Other and Mobile as folders — the same order Chromium's come in.
+    private static func bookmarkNodes(in file: URL) throws -> [Bookmark] {
+        let copy = try Snapshot(of: file)
+        let temp = copy.file
+        defer { withExtendedLifetime(copy) {} }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT b.id, b.type, b.parent, b.title, p.url, b.guid
+        FROM moz_bookmarks b
+        LEFT JOIN moz_places p ON b.fk = p.id
+        WHERE b.type IN (1, 2)
+        ORDER BY b.position ASC
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var items: [Raw] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            let id = sqlite3_column_int64(statement, 0)
+            let type = Int(sqlite3_column_int(statement, 1))
+            let parent = sqlite3_column_int64(statement, 2)
+            let title = sqlite3_column_text(statement, 3).map { String(cString: $0) } ?? ""
+            let url = sqlite3_column_text(statement, 4).map { String(cString: $0) }
+            let guid = sqlite3_column_text(statement, 5).map { String(cString: $0) } ?? ""
+            items.append(Raw(id: id, type: type, parent: parent, title: title, url: url, guid: guid))
+        }
+
+        var byParent: [Int64: [Raw]] = [:]
+        var byGuid: [String: Raw] = [:]
+        for item in items {
+            byParent[item.parent, default: []].append(item)
+            if !item.guid.isEmpty { byGuid[item.guid] = item }
+        }
+
+        // A page is type 1, a folder type 2. The tags folder is Firefox's own
+        // bookkeeping, not bookmarks, so it is left out.
+        func children(of parent: Int64) -> [Bookmark] {
+            (byParent[parent] ?? []).compactMap { item in
+                if item.type == 1 {
+                    guard let raw = item.url, let url = URL(string: raw),
+                          url.scheme == "http" || url.scheme == "https"
+                    else { return nil }
+                    return .site(item.title, url)
+                }
+                guard item.type == 2, item.guid != "tags________" else { return nil }
+                return .folder(item.title.isEmpty ? "Folder" : item.title, children(of: item.id))
+            }
+        }
+
+        var out: [Bookmark] = []
+        if let toolbar = byGuid["toolbar_____"] { out += children(of: toolbar.id) }
+        if let menu = byGuid["menu________"] { out += children(of: menu.id) }
+        if let unfiled = byGuid["unfiled_____"] {
+            let kids = children(of: unfiled.id)
+            if !kids.isEmpty { out.append(.folder("Other", kids)) }
+        }
+        if let mobile = byGuid["mobile______"] {
+            let kids = children(of: mobile.id)
+            if !kids.isEmpty { out.append(.folder("Mobile", kids)) }
+        }
+        return out
+    }
+
+    /// The other browser's icons for the given pages, host by host, from
+    /// favicons.sqlite beside places.sqlite: the largest bitmap it kept for
+    /// the page, or failing that for the site's front door.
+    static func icons(in source: Source, for urls: [URL], limit: Int = 400) -> [String: Data] {
+        var out: [String: Data] = [:]
+        var wanted: [(host: String, url: URL)] = []
+        var seen = Set<String>()
+        for url in urls {
+            guard let host = url.host()?.lowercased(), seen.insert(host).inserted else { continue }
+            wanted.append((host, url))
+            if wanted.count >= limit { break }
+        }
+        guard !wanted.isEmpty else { return out }
+
+        for file in source.files {
+            let favicons = file.deletingLastPathComponent().appendingPathComponent("favicons.sqlite")
+            guard FileManager.default.fileExists(atPath: favicons.path),
+                  let copy = try? Snapshot(of: favicons)
+            else { continue }
+            let temp = copy.file
+            defer { withExtendedLifetime(copy) {} }
+
+            var db: OpaquePointer?
+            guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else { continue }
+            defer { sqlite3_close(db) }
+            let sql = """
+            SELECT i.data FROM moz_pages_w_icons p
+            JOIN moz_icons_to_pages m ON m.page_id = p.id
+            JOIN moz_icons i ON i.id = m.icon_id
+            WHERE p.page_url = ? AND i.data IS NOT NULL
+            ORDER BY i.width DESC LIMIT 1
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { continue }
+            defer { sqlite3_finalize(statement) }
+
+            for (host, url) in wanted where out[host] == nil {
+                var doors = [url.absoluteString]
+                if let scheme = url.scheme, let home = url.host() {
+                    doors.append("\(scheme)://\(home)/")
+                }
+                for door in doors {
+                    sqlite3_reset(statement)
+                    sqlite3_bind_text(statement, 1, door, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                    guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { continue }
+                    let count = Int(sqlite3_column_bytes(statement, 0))
+                    guard count > 60 else { continue }
+                    out[host] = Data(bytes: bytes, count: count)
+                    break
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: - where they have been
+
+    /// The other browser's history — the same Place a Chromium browser gives,
+    /// so the rest of the app can't tell them apart.
+    static func places(in source: Source, limit: Int = 3000) -> [Chromium.Place] {
+        var out: [Chromium.Place] = []
+        for file in source.files {
+            out += (try? placeRows(in: file, limit: limit)) ?? []
+        }
+        return Array(out.sorted { $0.last > $1.last }.prefix(limit))
+    }
+
+    private static func placeRows(in file: URL, limit: Int) throws -> [Chromium.Place] {
+        let copy = try Snapshot(of: file)
+        let temp = copy.file
+        defer { withExtendedLifetime(copy) {} }
+
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(temp.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_close(db) }
+
+        let sql = """
+        SELECT url, title, visit_count, last_visit_date FROM moz_places
+        WHERE hidden = 0 AND visit_count > 0 AND last_visit_date IS NOT NULL
+        ORDER BY last_visit_date DESC LIMIT \(limit)
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw Trouble.unreadable
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var out: [Chromium.Place] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let raw = sqlite3_column_text(statement, 0), let url = URL(string: String(cString: raw)),
+                  url.scheme == "http" || url.scheme == "https"
+            else { continue }
+            let title = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? ""
+            let count = Int(sqlite3_column_int(statement, 2))
+            // Microseconds since 1970, Firefox's idea of a date — no 1601
+            // offset, unlike Chromium's.
+            let stamp = sqlite3_column_int64(statement, 3)
+            let last = stamp > 0 ? Date(timeIntervalSince1970: Double(stamp) / 1_000_000) : Date()
+            out.append(Chromium.Place(url: url, title: title, count: max(1, count), last: last))
+        }
+        return out
+    }
+}
+
+/// One browser to bring things over from, whichever family it belongs to, so
+/// the welcome, the panels and the bench verb work in one vocabulary and
+/// Chrome and Firefox sit side by side without either knowing about the
+/// other.
+enum ImportSource: Identifiable, Hashable {
+    case chromium(Chromium.Source)
+    case mozilla(Mozilla.Source)
+
+    var id: String {
+        switch self {
+        case .chromium(let s): return "chromium-\(s.id)"
+        case .mozilla(let s): return "mozilla-\(s.id)"
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .chromium(let s): return s.name
+        case .mozilla(let s): return s.name
+        }
+    }
+
+    /// Whether its saved passwords can be read here. Firefox's arrive in a
+    /// later change; for now only Chromium's do.
+    var hasPasswords: Bool {
+        switch self {
+        case .chromium: return true
+        case .mozilla: return false
+        }
+    }
+
+    var bookmarks: [Bookmark] {
+        switch self {
+        case .chromium(let s): return Chromium.bookmarks(in: s)
+        case .mozilla(let s): return Mozilla.bookmarks(in: s)
+        }
+    }
+
+    func places(limit: Int = 3000) -> [Chromium.Place] {
+        switch self {
+        case .chromium(let s): return Chromium.places(in: s, limit: limit)
+        case .mozilla(let s): return Mozilla.places(in: s, limit: limit)
+        }
+    }
+
+    func icons(for urls: [URL]) -> [String: Data] {
+        switch self {
+        case .chromium(let s): return Chromium.icons(in: s, for: urls)
+        case .mozilla(let s): return Mozilla.icons(in: s, for: urls)
+        }
+    }
+
+    func read() throws -> Chromium.Found {
+        switch self {
+        case .chromium(let s): return try Chromium.read(s)
+        case .mozilla: throw Chromium.Trouble.unreadable
+        }
+    }
+
+    /// The profiles behind it, by folder name — for the bench verb to report.
+    var profiles: [String] {
+        switch self {
+        case .chromium(let s): return s.profiles.map(\.lastPathComponent)
+        case .mozilla(let s): return s.files.map { $0.deletingLastPathComponent().lastPathComponent }
+        }
+    }
+
+    static func installed() -> [ImportSource] {
+        Chromium.installed().map(ImportSource.chromium) + Mozilla.installed().map(ImportSource.mozilla)
+    }
+}
+
 /// A copy of one of another browser's SQLite files to read from, with the
 /// two files SQLite keeps beside it while the browser runs: what was
 /// written last is often still in "-wal", and a copy without it misses the

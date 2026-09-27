@@ -15,7 +15,7 @@ struct WelcomePanel: View {
     // finding them looks through each browser's folders, and as an initial
     // value that ran every time the panel was made, the first window's
     // included, for a page that isn't showing yet.
-    @State private var source: Chromium.Source?
+    @State private var source: ImportSource?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
@@ -80,7 +80,7 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading("Bring things over.", "Passwords go into your keychain, bookmarks into the menu, and history means the address field already knows where you go. Nothing in the other browser changes.")
 
-            let sources = Chromium.installed()
+            let sources = ImportSource.installed()
             let unreadable = Chromium.unreadable()
             if sources.isEmpty {
                 Text(unreadable.isEmpty
@@ -90,6 +90,10 @@ struct WelcomePanel: View {
                     .foregroundStyle(Palette.faint)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
+                // The one picked, or the first: Firefox and Zen have no
+                // passwords to bring yet, so that choice comes and goes with
+                // the browser in front.
+                let current = source ?? sources[0]
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
                         Segmented(
@@ -101,14 +105,16 @@ struct WelcomePanel: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.muted)
                     }
-                    Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
+                    if current.hasPasswords {
+                        Choice("Passwords", "macOS will ask once for that browser's keychain key", on: $wantsPasswords)
+                    }
                     Choice("Bookmarks", "Folders and all, behind the bookmark button", on: $wantsBookmarks)
                     Choice("History", "The last few thousand places, for finishing addresses", on: $wantsHistory)
                 }
 
                 HStack(spacing: 12) {
                     Big(bringing ? "Bringing…" : "Bring them in", filled: true) { bringAll() }
-                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks))
+                        .disabled(bringing || brought != nil || !((current.hasPasswords && wantsPasswords) || wantsHistory || wantsBookmarks))
                     if bringing { Ring(size: 10) }
                     if let brought {
                         Text(brought)
@@ -219,14 +225,14 @@ struct WelcomePanel: View {
     // MARK: - doing
 
     private func bringAll() {
-        guard let source = source ?? Chromium.installed().first else { return }
+        guard let source = source ?? ImportSource.installed().first else { return }
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
-        if wantsPasswords {
+        if source.hasPasswords && wantsPasswords {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
-                let outcome = Result { try Chromium.read(source) }
+                let outcome = Result { try source.read() }
                 DispatchQueue.main.async {
                     switch outcome {
                     case .success(let found):

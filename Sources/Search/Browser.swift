@@ -66,8 +66,8 @@ final class Browser: NSObject, ObservableObject {
     /// icons it had for those sites, so the menu wears them from the start
     /// instead of a letter each. Returns how many pages came over.
     @discardableResult
-    func takeBookmarks(from source: Chromium.Source) -> Int {
-        let found = Chromium.bookmarks(in: source)
+    func takeBookmarks(from source: ImportSource) -> Int {
+        let found = source.bookmarks
         let (count, already) = bookmarks.take(found, from: source.name)
         announce(
             Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
@@ -77,7 +77,7 @@ final class Browser: NSObject, ObservableObject {
         )
         let urls = Bookmarks.urls(found)
         DispatchQueue.global(qos: .utility).async {
-            let icons = Chromium.icons(in: source, for: urls)
+            let icons = source.icons(for: urls)
             Task { @MainActor in
                 for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
                 self.objectWillChange.send()
@@ -408,7 +408,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// What came back from another browser's store, put in the keychain.
-    func took(_ outcome: Result<Chromium.Found, Error>, from source: Chromium.Source) {
+    func took(_ outcome: Result<Chromium.Found, Error>, from name: String) {
         switch outcome {
         case .success(let found):
             var kept = 0
@@ -420,19 +420,19 @@ final class Browser: NSObject, ObservableObject {
             found.never.forEach { never.insert($0) }
             Vault.never = never
             relist()
-            announce(kept == 0 ? "Nothing new in \(source.name)" : "\(kept) passwords from \(source.name)")
+            announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
-            announce("\(source.name) didn't give up its keychain key")
+            announce("\(name) didn't give up its keychain key")
         case .failure:
-            announce("Nothing readable in \(source.name)")
+            announce("Nothing readable in \(name)")
         }
     }
 
     /// The other browser's history, into this one's. Off the main thread for
     /// the reading; the merge itself is a moment.
-    func takePlaces(from source: Chromium.Source, then done: @escaping (Int) -> Void) {
+    func takePlaces(from source: ImportSource, then done: @escaping (Int) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let places = Chromium.places(in: source)
+            let places = source.places()
             DispatchQueue.main.async {
                 for place in places {
                     self.history.take(place.url, title: place.title, count: place.count, last: place.last)
