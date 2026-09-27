@@ -509,12 +509,13 @@ private struct TabPill: View {
                 // look. What you have to hit is the whole right-hand end of the
                 // tab: an overlay is not laid out, so it can reach past its own
                 // frame without moving anything that is.
+                //
+                // A view of AppKit's own takes the click there, while the
+                // cross shows (see CloseClick).
                 .overlay {
                     if !editing {
-                        Color.clear
+                        CloseClick(armed: hovering, act: close)
                             .frame(width: 30, height: 28)
-                            .contentShape(Rectangle())
-                            .onTapGesture { if hovering { close() } }
                     }
                 }
                 .animation(Motion.quick, value: hovering)
@@ -819,6 +820,55 @@ struct OneClick: ViewModifier {
             content.onTapGesture(count: 2, perform: act)
         } else {
             content.onTapGesture(perform: act)
+        }
+    }
+}
+
+/// A click on a tab's cross closes it — taken by a real view laid over the
+/// cross rather than by a SwiftUI tap. Out over the page, in the strip folded
+/// away with ⌘S, the tap never came: the cross showed under the pointer and
+/// clicking it did nothing (Drice). A view of AppKit's own is handed the
+/// press by AppKit itself, as the middle button's is (MiddleClick), and it
+/// answers only while the cross is there to be pressed, only to the left
+/// button; to anything else it isn't there, and the tab goes on as before.
+struct CloseClick: NSViewRepresentable {
+    let armed: Bool
+    let act: () -> Void
+
+    func makeNSView(context: Context) -> NSView { Cross() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? Cross)?.armed = armed
+        (view as? Cross)?.act = act
+    }
+
+    private final class Cross: NSView {
+        var armed = false
+        var act: () -> Void = {}
+        private var pressed = false
+
+        /// Never the window's to drag from: the press is the cross's.
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        /// Asked about every event over the cross, the pointer moving included;
+        /// only a left press, while the cross shows, is this view's.
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard armed, let event = NSApp.currentEvent,
+                  event.type == .leftMouseDown, event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
+            else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            pressed = true
+        }
+
+        /// On the release, and only if it is still over the cross: a press
+        /// taken back by moving off before letting go closes nothing.
+        override func mouseUp(with event: NSEvent) {
+            guard pressed else { return }
+            pressed = false
+            if bounds.contains(convert(event.locationInWindow, from: nil)) { act() }
         }
     }
 }
