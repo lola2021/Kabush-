@@ -619,6 +619,7 @@ final class Browser: NSObject, ObservableObject {
     func pin(_ tab: Tab) {
         if tab.pin == nil {
             tab.pin = tab.monogram
+            tab.home = tab.pending ?? tab.address
             // Pinned tabs live at the head of the row, in the order they were
             // pinned, so their letters never move under your hand.
             if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
@@ -635,6 +636,34 @@ final class Browser: NSObject, ObservableObject {
         // address and applied. Changing it is a separate act, for the day it
         // matters — which is why it is not folded into this one.
         writeSession(now: true)
+    }
+
+    /// A pin's page, from the session: the one it was pinned at, or — for a
+    /// pin from before pins kept theirs — where it was when it came back.
+    static func home(of entry: Session.Entry, at url: URL) -> URL? {
+        guard entry.pin != nil else { return nil }
+        return entry.home.flatMap(URL.init(string:)) ?? url
+    }
+
+    /// A double-click on the pin you are on: back to the page it was pinned
+    /// at, as a pin in Arc goes home (#141). Already there, the double-click
+    /// changes its letter, as it always did.
+    func goHome(_ tab: Tab) {
+        guard tab.pin != nil else { return }
+        guard let home = tab.home, !Browser.samePage(home, tab.address) else { return editLetter(tab) }
+        tab.go(to: home)
+        rememberSession()
+    }
+
+    /// The same page, give or take a trailing slash.
+    static func samePage(_ one: URL, _ other: URL?) -> Bool {
+        guard let other else { return false }
+        func bare(_ url: URL) -> String {
+            var text = url.absoluteString
+            while text.hasSuffix("/") { text.removeLast() }
+            return text
+        }
+        return bare(one) == bare(other)
     }
 
     /// Change Letter, or a double-click on the square itself.
@@ -661,6 +690,7 @@ final class Browser: NSObject, ObservableObject {
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
+        tab.home = nil
         defer { writeSession(now: true) }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
@@ -966,6 +996,7 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.home = Browser.home(of: entry, at: url)
             tabs.append(tab)
         }
         guard !tabs.isEmpty else {
@@ -1132,7 +1163,8 @@ final class Browser: NSObject, ObservableObject {
         for tab in tabs {
             guard kept(tab), let url = tab.pending ?? tab.address else { continue }
             if tab.id == id { active = entries.count }
-            entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name))
+            entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name,
+                                         home: tab.pin == nil ? nil : tab.home?.absoluteString))
         }
         // The tab you were on isn't kept — a private or blank one: the one
         // kept just before it comes back in front, not the first of the row.
@@ -1688,6 +1720,7 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.home = Browser.home(of: entry, at: url)
             row.append(tab)
         }
         let active = row.indices.contains(saved.active) ? row[saved.active].id : row.first?.id

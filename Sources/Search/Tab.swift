@@ -409,6 +409,9 @@ final class Tab: ObservableObject, Identifiable {
     /// at the head of the row and gives up its title for that letter — which
     /// is all you need for the five or six pages you keep open all day.
     @Published var pin: String?
+    /// For a pin, the page it was pinned at: a double-click on it goes back
+    /// there (Browser.goHome).
+    var home: URL?
 
     /// A name you gave it, in place of whatever the page calls itself. It
     /// stays through navigation: a tab you named is a tab you are keeping for

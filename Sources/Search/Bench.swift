@@ -330,8 +330,11 @@ final class Bench {
             // Pin a tab, or unpin it with "off". Only on a SEARCH_PROBE run.
             guard Store.testing else { answer(["error": "pin only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
-            if request["off"] as? Bool == true { browser.unpin(tab) } else { browser.pin(tab) }
-            answer(["pin": tab.pin ?? "", "pinned": browser.pinnedCount])
+            if request["off"] as? Bool == true { browser.unpin(tab) }
+            else if request["home"] as? Bool == true { browser.goHome(tab) }
+            else { browser.pin(tab) }
+            answer(["pin": tab.pin ?? "", "pinned": browser.pinnedCount, "home": tab.home?.absoluteString ?? "",
+                    "address": tab.address?.absoluteString ?? "", "editingLetter": browser.editingPin == tab.id])
 
         case "select":
             // Picking a tab takes the window over, which the bench never does

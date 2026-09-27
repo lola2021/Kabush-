@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- A double-click on the pinned tab you are on takes it back to the page it was pinned at, wherever you have wandered since; already there, it changes the pin's letter as before. Thanks [@armin-ahmadii](https://github.com/armin-ahmadii) for the idea ([#141](https://github.com/driceroland/Search/issues/141))
 - A pinned tab shows the loading ring while its page comes, as other tabs do, in the bar and the column.
 - Downloads show while they happen: a small circle beside the other buttons fills as a file comes, turns into an arrow once it is in, and opens Downloads when clicked; it is there only while something downloads and a moment after. The file shows its progress in the Finder and on the Dock's Downloads stack, as Safari's do, and the "Saved" line at the bottom shows it in the Finder when clicked.
 - Search › Check for Updates…, under About Search, as in any Mac app: the answer comes in the line at the foot of the window, and the item becomes Restart to Update once a newer version is in place. Search also looks by itself at every launch and then every hour, where it looked once a day.
