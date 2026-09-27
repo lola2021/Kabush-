@@ -162,7 +162,9 @@ struct Omnibox: View {
                 default:
                     EmptyView()
                 }
-                Text(offer.key)
+                // The row reads as 1.0.4's did, without the www; the key
+                // itself keeps it, for completing and going there.
+                Text(Address.withoutWWW(offer.key))
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)

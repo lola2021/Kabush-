@@ -21,6 +21,7 @@ in [ROADMAP.md](ROADMAP.md).
 - An extension's popup follows the width its page asks for, narrower as well as wider: Bitwarden set to narrow no longer leaves an empty strip down the popup's side. Thanks [@dttdrv](https://github.com/dttdrv) ([#384](https://github.com/driceroland/Search/pull/384))
 - Search no longer offers to save a password typed into an extension's own page, such as Bitwarden's unlock PIN. Thanks [@dttdrv](https://github.com/dttdrv) ([#385](https://github.com/driceroland/Search/pull/385))
 - An extension can move and size a window with windows.update, as in Chrome; WebKit refused it as not implemented, and Bitwarden's pop-out logged an error each time it opened. Thanks [@dttdrv](https://github.com/dttdrv) ([#386](https://github.com/driceroland/Search/pull/386))
+- History keeps pages that differ only by http or https, by port, or by the case of their path as separate places, so localhost:3000 and localhost:4000 no longer overwrite each other; typing still matches either case. A name and password written into an address are no longer kept in the history. Thanks [@lulkebit](https://github.com/lulkebit) ([#374](https://github.com/driceroland/Search/pull/374))
 
 ## 1.0.4 — 27 September 2026
 
