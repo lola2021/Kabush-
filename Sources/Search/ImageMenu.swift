@@ -25,6 +25,9 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
     static let name = "officeImages"
 
     weak var tab: Tab?
+    /// The frame the last right-click on an image came from: a blob: image
+    /// can only be read in the page that made it.
+    private(set) var frame: WKFrameInfo?
 
     /// Every frame: an image inside an ad or a map embed is still an image.
     /// Only a genuine <img> with something to point at is worth the trip —
@@ -65,6 +68,7 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
         else { return }
         MainActor.assumeIsolated { [weak self] in
             guard let self, let tab else { return }
+            frame = message.frameInfo
             tab.onImageMenu?(tab, url)
         }
     }
@@ -86,7 +90,7 @@ extension Browser {
         })
         menu.addItem(.separator())
         menu.addItem(ImageMenuItem("Copy Image") { [weak self] in
-            self?.copyImage(at: url)
+            self?.copyImage(at: url, in: tab)
         })
         menu.addItem(ImageMenuItem("Download Image") { [weak self] in
             self?.downloadImage(at: url, from: webView)
@@ -108,13 +112,9 @@ extension Browser {
     /// one — an NSImage hands a receiving app real bytes to choose from
     /// (TIFF, PNG, whatever it asks for), which is the thing a pasteboard
     /// promise doesn't always give it back on a paste.
-    func copyImage(at url: URL) {
+    func copyImage(at url: URL, in tab: Tab) {
         Task {
-            // Fetched without a cache on disk: the picture may be a private
-            // tab's, and a copy is not a visit.
-            guard let (data, _) = try? await Browser.fetcher.data(from: url),
-                  let image = NSImage(data: data)
-            else {
+            guard let data = await imageData(at: url, in: tab), let image = NSImage(data: data) else {
                 announce("Couldn't copy that image")
                 return
             }
@@ -122,6 +122,34 @@ extension Browser {
             NSPasteboard.general.writeObjects([image])
             announce("Image copied")
         }
+    }
+
+    /// The picture's bytes. Fetched without a cache on disk: it may be a
+    /// private tab's, and a copy is not a visit. A blob: picture — the ones
+    /// WhatsApp Web shows — exists only inside the page that made it, where
+    /// no URLSession can reach: it is read there, in Search's own world, in
+    /// the frame it was right-clicked in (idea 179).
+    func imageData(at url: URL, in tab: Tab) async -> Data? {
+        guard url.scheme?.lowercased() == "blob" else {
+            return try? await Browser.fetcher.data(from: url).0
+        }
+        guard let web = tab.built else { return nil }
+        let read = """
+        const found = await fetch(src);
+        const blob = await found.blob();
+        if (!blob.type.startsWith("image/") || blob.size > 50000000) return null;
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let text = "";
+        for (let i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+        return btoa(text);
+        """
+        let frame = tab.imageFrame
+        let answer: Any? = await withCheckedContinuation { done in
+            web.callAsyncJavaScript(read, arguments: ["src": url.absoluteString], in: frame, in: Web.world) { result in
+                done.resume(returning: try? result.get())
+            }
+        }
+        return (answer as? String).flatMap { Data(base64Encoded: $0) }
     }
 
     /// The same WKDownload this app already knows how to finish — asked for

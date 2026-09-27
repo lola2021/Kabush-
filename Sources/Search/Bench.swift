@@ -1075,6 +1075,19 @@ final class Bench {
                 }
             }
 
+        case "image-data":
+            // What Copy Image would put on the pasteboard, without putting it
+            // there: the picture at an address, read as the menu reads it.
+            guard Store.testing else { answer(["error": "image-data only works on a --test run"]); return }
+            guard let tab = (request["id"] as? String).flatMap({ id in browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(id) } }) ?? browser.active,
+                  let text = request["url"] as? String, let url = URL(string: text)
+            else { answer(["error": "image-data needs a url"]); return }
+            Task {
+                let data = await browser.imageData(at: url, in: tab)
+                let image = data.flatMap { NSImage(data: $0) }
+                answer(["bytes": data?.count ?? 0, "image": image.map { [Int($0.size.width), Int($0.size.height)] } ?? []])
+            }
+
         case "find":
             // Find on Page as typed into its bar, then Next or Previous
             // pressed, and what the bar says once the page has answered.

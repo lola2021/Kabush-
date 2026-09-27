@@ -454,6 +454,10 @@ def main(argv):
         else:
             if len(args) > 2: request["frames"] = int(args[2])
             if len(args) > 3: request["every"] = float(args[3])
+    elif verb == "image-data":
+        if len(args) not in (1, 2): sys.exit("usage: bench image-data URL [ID]")
+        request["url"] = args[0]
+        if len(args) == 2: request["id"] = args[1]
     elif verb == "find":
         if not args: sys.exit("usage: bench find TEXT [next N] [back N] [case] [words]")
         request["text"] = args[0]
