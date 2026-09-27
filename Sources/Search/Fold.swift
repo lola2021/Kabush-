@@ -4,7 +4,7 @@ import SwiftUI
 //
 // The column is two hundred and some points the page never gets back, even
 // while all you do is read. Folded, the page takes the whole window. The tabs
-// are one push against the left edge away: the column slides out over the
+// are one push against its edge away: the column slides out over the
 // page, the same column with the same rows, and goes again once the pointer
 // leaves it. A short grace before it goes, so a hand that overshoots on the
 // way back in doesn't lose it.
@@ -28,8 +28,8 @@ import SwiftUI
 // The edge isn't only where the pointer stops. A hand flung at it, with the
 // window away from the screen's own edge, sails past it off the window, and
 // was never seen at the edge at all. Just past the edge counts as the edge,
-// if the pointer got there from the window, not from the left, and once it
-// rests there a moment: a pointer only crossing to a display on the left
+// if the pointer got there from the window, not from beyond, and once it
+// rests there a moment: a pointer only crossing to a display on that side
 // goes on through. And while the column is out, a pointer just past the
 // edge is still on it.
 //
@@ -56,7 +56,7 @@ extension Browser {
 
 /// Over the window while the column or the strip is folded: the column or
 /// the strip itself while it is out, brought out by the pointer at the
-/// window's left edge, or its top edge.
+/// window's chosen side, or its top edge.
 struct Fold: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
@@ -71,7 +71,8 @@ struct Fold: View {
 
     /// How near the edge the pointer has to be.
     private static let edge: CGFloat = 6
-    /// How far past the window's left edge the pointer still counts as on it.
+    /// How far past the window's edge, on the column's side, the pointer
+    /// still counts as on it.
     private static let overshoot: CGFloat = 48
     /// The grace before the column goes back in.
     private static let grace: TimeInterval = 0.3
@@ -83,7 +84,7 @@ struct Fold: View {
     private static let dwell: TimeInterval = 0.15
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: onRight ? .topTrailing : .topLeading) {
             // In the column's mode the page reaches the window's top edge —
             // beside the column, and everywhere once it is folded away — and
             // there was nowhere there to drag the window from, or to
@@ -112,23 +113,28 @@ struct Fold: View {
                     }
                     .transition(.move(edge: .top))
             }
-            ZStack(alignment: .leading) {
+            ZStack(alignment: onRight ? .trailing : .leading) {
                 Color.clear.frame(width: 0)
                 if folding, prefs.sidebar, browser.peeking {
                     SideBar(browser: browser, prefs: prefs)
-                        .shadow(color: .black.opacity(0.14), radius: 20, x: 4)
-                        .transition(.move(edge: .leading))
+                        .shadow(color: .black.opacity(0.14), radius: 20, x: onRight ? -4 : 4)
+                        .transition(.move(edge: onRight ? .trailing : .leading))
                 }
             }
-            .frame(maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                   alignment: onRight ? .trailing : .leading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity,
+               alignment: onRight ? .topTrailing : .topLeading)
         .ignoresSafeArea()
         .onAppear {
             hideLights()
             watch()
         }
-        .onDisappear { pointer.stop() }
+        .onDisappear {
+            resetPending()
+            pointer.stop()
+        }
         // A column folded for good is folded before there is a window to
         // hide the lights of; they go once there is one.
         .background(WindowSetup { window in
@@ -137,15 +143,28 @@ struct Fold: View {
             watch()
         })
         .onChange(of: lightsOff) { _, _ in hideLights() }
-        .onChange(of: folding) { _, _ in watch() }
+        .onChange(of: folding) { _, _ in
+            resetPending()
+            watch()
+        }
         // Back to the strip and then to the column again: the column comes
         // back as it rests — whole, not folded from a time nobody remembers,
         // unless Settings says it rests folded.
         .onChange(of: prefs.sidebar) { _, _ in
+            resetPending()
             browser.folded = prefs.sidebar && prefs.sideHides
             browser.peeking = false
         }
+        .onChange(of: prefs.sidePosition) { _, _ in
+            resetPending()
+            browser.peeking = false
+            if let bar = Fold.titlebar { Fold.reset(bar, hidden: lightsOff) }
+        }
+        .onChange(of: prefs.sideWidth) { _, _ in
+            if browser.folded { hideLights() }
+        }
         .onChange(of: prefs.sideHides) { _, hides in
+            resetPending()
             guard prefs.sidebar else { return }
             browser.peeking = false
             withAnimation(Motion.glide) { browser.folded = hides }
@@ -180,6 +199,18 @@ struct Fold: View {
         browser.folded && !browser.peeking
     }
 
+    private var onRight: Bool {
+        prefs.sidebar && prefs.sidePosition == .right
+    }
+
+    private func resetPending() {
+        arriving?.cancel()
+        arriving = nil
+        leaving?.cancel()
+        leaving = nil
+        inside = false
+    }
+
     /// The pointer is watched only while there is something folded for it
     /// to bring out; the rest of the time no move of it costs anything.
     private func watch() {
@@ -201,12 +232,14 @@ struct Fold: View {
         let point = window.convertPoint(fromScreen: screen)
         let size = window.frame.size
         let inWindow = point.x >= 0 && point.x < size.width && point.y >= 0 && point.y < size.height
-        // Distance from the left edge for the column, from the top for the strip.
-        let distance = prefs.sidebar ? point.x : size.height - point.y
-        // Just past the left edge, beside the window rather than above or
-        // below it, come off the window to get there, and not on the Dock or
-        // the menu bar.
-        let beside = prefs.sidebar && point.x < 0 && point.x > -Fold.overshoot
+        // Distance from the column's edge for the column, from the top for
+        // the strip.
+        let distance = prefs.sidebar ? (onRight ? size.width - point.x : point.x) : size.height - point.y
+        // Just past the column's edge, beside the window rather than above
+        // or below it, come off the window to get there, and not on the Dock
+        // or the menu bar.
+        let past = onRight ? point.x - size.width : -point.x
+        let beside = prefs.sidebar && past > 0 && past < Fold.overshoot
             && point.y >= 0 && point.y < size.height
         let overshot = beside && pointer.crossing
             && NSScreen.screens.contains { $0.visibleFrame.contains(screen) }
@@ -292,7 +325,7 @@ struct Fold: View {
     private func hideLights() {
         guard let bar = Fold.titlebar else { return }
         if prefs.sidebar {
-            Fold.slide(bar, off: lightsOff, by: prefs.sideWidth)
+            Fold.slide(bar, off: lightsOff, by: prefs.sideWidth, right: onRight)
         } else {
             Fold.slide(bar, off: lightsOff, by: Metrics.strip, up: true)
         }
@@ -306,14 +339,22 @@ struct Fold: View {
     /// lights on its way out.
     private static var slides = 0
 
+    /// Drop an overtaken slide when the column changes sides.
+    static func reset(_ bar: NSView, hidden: Bool) {
+        slides += 1
+        bar.layer?.removeAnimation(forKey: "fold")
+        bar.isHidden = hidden
+    }
+
     /// The lights ride with the column, as everything else in its corner
     /// does. Shown or hidden at once, they stood in their place while the
     /// column was still sliding in under them, and vanished before it had
-    /// gone. So they come in from the left edge and go back off it, on the
+    /// gone. So they come in from the chosen edge and go back off it, on the
     /// column's own spring (Motion.glide, in Core Animation's terms) — from
-    /// wherever they are, when the pointer turns back halfway. `up`: off the
-    /// top edge with the strip rather than off the left edge with the column.
-    static func slide(_ bar: NSView, off: Bool, by width: CGFloat, up: Bool = false) {
+    /// wherever they are, when the pointer turns back halfway. `up` sends
+    /// the strip's lights off the top edge.
+    static func slide(_ bar: NSView, off: Bool, by width: CGFloat, up: Bool = false,
+                      right: Bool = false) {
         slides += 1
         let turn = slides
         guard let layer = bar.layer else {
@@ -329,7 +370,8 @@ struct Fold: View {
         }
         // Up is +y in a superview that isn't flipped, -y in one that is.
         let path = up ? "transform.translation.y" : "transform.translation.x"
-        let gone: CGFloat = up ? ((bar.superview?.isFlipped ?? false) ? -width : width) : -width
+        let gone: CGFloat = up ? ((bar.superview?.isFlipped ?? false) ? -width : width)
+            : (right ? width : -width)
         let other = up ? "transform.translation.x" : "transform.translation.y"
         let moving = layer.animation(forKey: "fold") != nil
         // A slide still running on the other axis — the layout was switched
@@ -376,7 +418,7 @@ struct Fold: View {
 @MainActor
 private final class Pointer {
     weak var window: NSWindow?
-    /// The pointer is over the window, or just went off its left edge from
+    /// The pointer is over the window, or just went off the column's edge from
     /// it and hasn't gone further.
     var crossing = false
     private var local: Any?
