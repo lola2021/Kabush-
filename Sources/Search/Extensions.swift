@@ -500,6 +500,9 @@ final class Extensions: NSObject, ObservableObject {
     /// not — before it returns, so several brought over from another
     /// browser go one after another.
     func install(id: String, confirm: Bool = true) async {
+        // A store id, and nothing else, goes into the request and the folder
+        // names below, whoever called.
+        guard id.count == 32, id.allSatisfy({ ("a"..."p").contains($0) }) else { return }
         guard !installed.contains(where: { $0.id == id }) else { return }
         busy = id
         defer { busy = nil }
