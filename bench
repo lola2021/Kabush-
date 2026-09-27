@@ -63,8 +63,9 @@
                                        each timed until the window has caught up; go: then Return, timed
                                        until the page is loading
     ./bench visible ID                 switched off: it made a window (off screen), and no verb makes one for now
-    ./bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT
-                                       test run: the AI add-on's requests, against a stand-in on this Mac
+    ./bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT
+                                       test run: the AI add-on's requests, against a stand-in on this Mac;
+                                       what of a page would go to the model, and an answer checked against it
     ./bench answer once|always|no     test run: the card of a page asking for the camera, microphone or location
     ./bench accounts [ROW]             test run: the list under the sign-in box the caret is in (passkeys,
                                        then passwords); ROW: a click on that row, from 0
@@ -464,12 +465,14 @@ def main(argv):
             elif word == "words": request["words"] = True
             else: sys.exit("usage: bench find TEXT [next N] [back N] [case] [words]")
     elif verb == "ai":
-        usage = "usage: bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT"
+        usage = "usage: bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT"
         if not args: sys.exit(usage)
         request["action"] = args[0]
         if args[0] == "mock" and len(args) == 2: request["url"] = args[1]
         elif args[0] == "key" and len(args) == 3: request["provider"], request["key"] = args[1], args[2]
         elif args[0] == "ask" and len(args) == 4: request["provider"], request["model"], request["text"] = args[1], args[2], args[3]
+        elif args[0] == "read" and len(args) == 2: request["id"] = args[1]
+        elif args[0] == "check" and len(args) == 2: request["text"] = args[1]
         else: sys.exit(usage)
     elif verb == "answer":
         if args not in (["once"], ["always"], ["no"]): sys.exit("usage: bench answer once|always|no")

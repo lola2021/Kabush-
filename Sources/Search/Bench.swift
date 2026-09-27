@@ -1142,8 +1142,22 @@ final class Bench {
                         answer(["error": error.localizedDescription, "text": text])
                     }
                 }
+            case "read":
+                // What of the page would go to the model, and nothing sent.
+                guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+                Task { @MainActor in
+                    guard let read = await AIPage.read(tab) else { answer(["error": "nothing to read"]); return }
+                    Bench.aiRead = read
+                    answer(["title": read.title, "text": read.text, "links": read.links.count, "cut": read.cut])
+                }
+            case "check":
+                // The last page read, and an answer checked against it.
+                guard let read = Bench.aiRead, let text = request["text"] as? String else {
+                    answer(["error": "ai read a page first, then ai check TEXT"]); return
+                }
+                answer(["strays": AIPage.strays(in: text, from: read)])
             default:
-                answer(["error": "ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT"])
+                answer(["error": "ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT"])
             }
 
         case "answer":
@@ -2619,6 +2633,9 @@ final class Bench {
         tab.web.autoresizingMask = [.width, .height]
         window.contentView?.addSubview(tab.web)
     }
+
+    /// The last page `ai read` read, for `ai check`.
+    static var aiRead: AIPage.Read?
 
     private func makeRoom() -> NSWindow {
         // Off every screen, and never key or main: it exists so that a web
