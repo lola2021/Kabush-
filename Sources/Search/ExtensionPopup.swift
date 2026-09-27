@@ -38,6 +38,15 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// The popup's web view, while one is up — for the bench.
     var view: WKWebView? { web }
 
+    /// On screen now.
+    var isUp: Bool { popover?.isShown == true }
+
+    /// The popup as its extension's worker finds it in clients.matchAll().
+    func client(of id: String) -> [String: Any]? {
+        guard extensionID == id, let url = web?.url else { return nil }
+        return ["id": "popup", "url": url.absoluteString, "visible": isUp, "focused": isUp && web?.window?.isKeyWindow == true]
+    }
+
     func show(_ url: URL, for context: WKWebExtensionContext, from anchor: NSView?) {
         close()
         guard let configuration = context.webViewConfiguration else { return }
@@ -81,8 +90,17 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         if let anchor, anchor.window != nil {
             popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
         } else if let content = (NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain && $0.frame.minX > -10_000 }))?.contentView {
-            let spot = NSRect(x: content.bounds.maxX - 60, y: content.bounds.maxY - 40, width: 1, height: 1)
-            popover.show(relativeTo: spot, of: content, preferredEdge: .minY)
+            // No button to hang from — the column or the strip folded away:
+            // where the buttons would be, the column's foot or the strip's
+            // far end. The window's content is SwiftUI's, a flipped view,
+            // whose top is at minY: measured from maxY, "the top right" was
+            // the bottom right, across the window from the column's buttons.
+            let bounds = content.bounds, flipped = content.isFlipped
+            let column = Extensions.shared.browser?.prefs.sidebar == true
+            let spot = column
+                ? NSRect(x: bounds.minX + 24, y: flipped ? bounds.maxY - 24 : bounds.minY + 24, width: 1, height: 1)
+                : NSRect(x: bounds.maxX - 60, y: flipped ? bounds.minY + 40 : bounds.maxY - 40, width: 1, height: 1)
+            popover.show(relativeTo: spot, of: content, preferredEdge: column ? .maxX : (flipped ? .maxY : .minY))
         }
         // Sized once loaded — or after a moment regardless, for a page that
         // never finishes loading.

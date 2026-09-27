@@ -393,6 +393,39 @@ enum ExtensionShims {
       if (worker && typeof root.InstallEvent === "function" && !InstallEvent.prototype.addRoutes) {
         InstallEvent.prototype.addRoutes = () => Promise.resolve();
       }
+      // clients.matchAll() in an extension's worker: Chrome lists the
+      // extension's own pages that are open — its popup, its pages in tabs.
+      // WebKit lists none, so an extension that checks whether its popup is
+      // open before sending it news always hears no: 1Password's popup
+      // stays on "connecting to the app" for ever, the answer from the app
+      // never passed on. The browser knows which pages are open, so they
+      // are added to the list; a message posted to one reaches it through
+      // a channel the pages listen on, as a message from the worker.
+      const clientsChannel = typeof BroadcastChannel === "function" && !inContent && !embedded ? new BroadcastChannel("search-clients") : null;
+      if (worker && clientsChannel && root.clients && typeof root.clients.matchAll === "function") {
+        const matchAll = root.clients.matchAll.bind(root.clients);
+        const client = (p) => ({
+          id: "search-" + p.id, url: p.url, type: "window", frameType: "top-level",
+          visibilityState: p.visible ? "visible" : "hidden", focused: !!p.focused,
+          postMessage: (data) => { try { clientsChannel.postMessage({ url: p.url, data }); } catch (e) {} },
+          focus() { return Promise.resolve(this); },
+          navigate: () => Promise.resolve(null),
+        });
+        put(root.clients, "matchAll", async (options) => {
+          const found = [...await matchAll(options)];
+          const type = (options && options.type) || "window";
+          if (type !== "window" && type !== "all") return found;
+          let pages = [];
+          try { pages = (await native("clients.pages", [])) || []; } catch (e) {}
+          const listed = new Set(found.map((c) => c.url));
+          return found.concat(pages.filter((p) => p && typeof p.url === "string" && !listed.has(p.url)).map(client));
+        });
+      } else if (clientsChannel && !background && typeof navigator !== "undefined" && navigator.serviceWorker) {
+        clientsChannel.onmessage = ({ data }) => {
+          if (!data || data.url !== location.href) return;
+          try { navigator.serviceWorker.dispatchEvent(new MessageEvent("message", { data: data.data })); } catch (e) {}
+        };
+      }
       // WebKit runs an extension's worker on its web process's main thread,
       // and a worker's WebSocket waits there for the main thread to set up
       // its channel — for itself, for ever: the worker and every page of the
@@ -2901,6 +2934,17 @@ enum ExtensionShims {
         case "debug.error":
             owner.noteError(first as? String ?? "?", for: id)
             return nil
+
+        // MARK: its own pages, for clients.matchAll() (see the shim)
+        case "clients.pages":
+            var pages: [[String: Any]] = []
+            if let popup = ExtensionPopup.shared.client(of: id) { pages.append(popup) }
+            for tab in browser.tabs {
+                guard let web = tab.built, let url = web.url, Browser.extensionHost(of: url) == id else { continue }
+                let shown = tab.id == browser.activeID && web.window?.occlusionState.contains(.visible) == true
+                pages.append(["id": tab.id.uuidString, "url": url.absoluteString, "visible": shown, "focused": shown && web.window?.isKeyWindow == true])
+            }
+            return pages
 
         // MARK: the button's popup
         case "action.popup":

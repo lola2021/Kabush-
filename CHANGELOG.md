@@ -34,6 +34,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Bitwarden no longer stops with “Symbol.dispose is not defined” as you sign in: Search supplies the two resource-cleanup symbols its code expects inside extensions, where this Mac's WebKit lacks them. Thanks [@lulkebit](https://github.com/lulkebit) ([#343](https://github.com/driceroland/Search/pull/343))
 - Clicking a tab to edit its address shows the address it really has: a port, a search's query, a #fragment and plain http:// are all kept, so Return reloads the same page. The field showed only the host and path, and Return went there instead — `127.0.0.1:8767/page` reopened on port 80, a results page lost its search, and an http site came back over https. Thanks [@57uart](https://github.com/57uart) ([#264](https://github.com/driceroland/Search/pull/264))
 - Clicking a pinned extension's button closes its popup even when macOS dismisses it on mouse-up, instead of opening it again at once. Thanks [@kinnrai](https://github.com/kinnrai) ([#248](https://github.com/driceroland/Search/pull/248))
+- 1Password's popup no longer waits on its spinner for ever once the 1Password app answers: its background only tells the popup what changed when it finds the popup open, and WebKit's `clients.matchAll()` never listed it. An extension's popup with no button to hang from, the column folded away, now opens where the buttons are rather than across the window, and the folded column stays out while a popup hangs from it.
 
 ## 1.0.3 — 24 September 2026
 

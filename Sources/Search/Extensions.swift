@@ -512,11 +512,12 @@ final class Extensions: NSObject, ObservableObject {
         noteError("restarted the extension: \(reason)", for: id)
         // Its popup goes with it; it is opened again once the extension is back.
         let popup = ExtensionPopup.shared.extensionID == id ? ExtensionPopup.shared.view?.url : nil
-        let anchor = anchors[id]?.view?.window != nil ? anchors[id]?.view : anchors[Extensions.menuAnchor]?.view
         unload(id)
         Task {
             guard await load(item), let popup, let context = contexts[id] else { return }
-            ExtensionPopup.shared.show(popup, for: context, from: anchor)
+            // Its button as it is now: the one it hung from may have gone
+            // with a folded column meanwhile.
+            ExtensionPopup.shared.show(popup, for: context, from: anchor(for: id))
         }
     }
 
@@ -901,11 +902,17 @@ final class Extensions: NSObject, ObservableObject {
         // a popup of its own first, and closing that one in favour of
         // Search's lost the new popup's first messages to its worker.
         if context.action(for: activeAdapter)?.presentsPopup == true, let url = popupURL(for: context) {
-            let own = anchors[id]?.view
-            ExtensionPopup.shared.show(url, for: context, from: own?.window != nil ? own : anchors[Extensions.menuAnchor]?.view)
+            ExtensionPopup.shared.show(url, for: context, from: anchor(for: id))
             return
         }
         context.performAction(for: activeAdapter)
+    }
+
+    /// What an extension's popup hangs from: its own button in the row,
+    /// else the puzzle button — whichever is in the window now.
+    func anchor(for id: String) -> NSView? {
+        let own = anchors[id]?.view
+        return own?.window != nil ? own : anchors[Extensions.menuAnchor]?.view
     }
 
     /// The page the button's popup is now: one the extension set for this
@@ -1012,9 +1019,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
         let url = action.popupWebView?.url ?? Extensions.popupURL(for: context)
         action.closePopup()
         guard let url else { return }
-        let own = anchors[context.uniqueIdentifier]?.view
-        let anchor = own?.window != nil ? own : anchors[Extensions.menuAnchor]?.view
-        ExtensionPopup.shared.show(url, for: context, from: anchor)
+        ExtensionPopup.shared.show(url, for: context, from: anchor(for: context.uniqueIdentifier))
     }
 
     /// `runtime.sendNativeMessage`. To "search" — the APIs WebKit doesn't
