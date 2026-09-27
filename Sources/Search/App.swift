@@ -1014,6 +1014,14 @@ struct ContentView: View {
     private func take(_ event: NSEvent) -> Bool {
         // A small window's keys are its own (see Little.swift).
         if let little = LittleWindow.owning(event.window) { return little.take(event) }
+        // An extension's popup window: ⌘W closes it, not a tab of the
+        // window menus act on; every other key is its page's.
+        if let popup = Browsers.browser(for: event.window), popup.extensionPopup != nil {
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard event.charactersIgnoringModifiers?.lowercased() == "w", flags == .command else { return false }
+            popup.window?.performClose(nil)
+            return true
+        }
         // A key being typed into Settings › Shortcuts is for the box.
         guard !ShortcutStore.shared.recording else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

@@ -459,6 +459,7 @@ final class Extensions: NSObject, ObservableObject {
 
     private func unload(_ id: String) {
         guard let context = contexts[id] else { return }
+        Browsers.closePopups(of: id)
         try? controller.unload(context)
         // What it kept going outside WebKit goes with it: its offscreen
         // page, and a Mac kept awake on its behalf.
@@ -1187,6 +1188,11 @@ extension Extensions: WKWebExtensionControllerDelegate {
         }
         for url in configuration.tabURLs { try Extensions.mayOpen(url) }
         let fresh = Browser(record: WindowRecord(space: browser?.spaceID ?? Space.firstID))
+        // A popup, as a password manager's vault or a sign-in opens: a small
+        // window of the page, not another browser window.
+        if configuration.windowType == .popup {
+            fresh.extensionPopup = contexts.first { $0.value === extensionContext }?.key ?? extensionContext.uniqueIdentifier
+        }
         for (index, url) in configuration.tabURLs.enumerated() {
             fresh.open(url, foreground: index == 0, atEnd: true)
         }
@@ -1199,9 +1205,21 @@ extension Extensions: WKWebExtensionControllerDelegate {
         let asked = configuration.frame
         let usable = !asked.isNull && [asked.minX, asked.minY, asked.width, asked.height].allSatisfy(\.isFinite)
             && asked.width >= 200 && asked.height >= 150
-        Browsers.open(fresh, frame: usable ? asked : nil)
+        var frame: NSRect? = usable ? asked : nil
+        if frame == nil, fresh.extensionPopup != nil, let screen = (browser?.window?.screen ?? NSScreen.main)?.visibleFrame {
+            frame = Self.popupFrame(asked: asked, on: screen)
+        }
+        Browsers.open(fresh, frame: frame)
         if !configuration.shouldBeFocused { Browsers.front?.window?.makeKeyAndOrderFront(nil) }
         return window(of: fresh)
+    }
+
+    /// A popup given its size without a place (Affinity's sign-in): that
+    /// size, in the middle of the screen. Nil when the size isn't one either.
+    nonisolated static func popupFrame(asked: CGRect, on screen: CGRect) -> CGRect? {
+        guard !asked.isNull, asked.width.isFinite, asked.height.isFinite, asked.width >= 200, asked.height >= 150 else { return nil }
+        let width = min(asked.width, screen.width), height = min(asked.height, screen.height)
+        return CGRect(x: screen.midX - width / 2, y: screen.midY - height / 2, width: width, height: height)
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, openOptionsPageFor extensionContext: WKWebExtensionContext) async throws {
@@ -1404,7 +1422,9 @@ final class ExtensionWindow: NSObject, WKWebExtensionWindow {
     }
 
     func activeTab(for context: WKWebExtensionContext) -> (any WKWebExtensionTab)? { browser.flatMap(owner.activeAdapter(of:)) }
-    func windowType(for context: WKWebExtensionContext) -> WKWebExtension.WindowType { .normal }
+    func windowType(for context: WKWebExtensionContext) -> WKWebExtension.WindowType {
+        browser?.extensionPopup != nil ? .popup : .normal
+    }
     func isPrivate(for context: WKWebExtensionContext) -> Bool { false }
 
     func windowState(for context: WKWebExtensionContext) -> WKWebExtension.WindowState {

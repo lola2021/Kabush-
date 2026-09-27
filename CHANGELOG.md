@@ -32,6 +32,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Search › Check for Updates… follows the update as it goes: Install Update when updates are set to wait, Downloading Update… while it comes in, Download Update… when Search can't swap itself where it is, and Restart to Update once it's in place. The line at the foot of the window points there. Thanks [@lulkebit](https://github.com/lulkebit) ([#373](https://github.com/driceroland/Search/pull/373))
 - An extension that fails to install, update or reload no longer takes the working copy with it: the one you had stays, running, with its settings, and only a copy that is fully in place replaces it. Thanks [@lulkebit](https://github.com/lulkebit) ([#376](https://github.com/driceroland/Search/pull/376))
 - Bookmarks inside a folder wear their sites' icons again, in the folder opened from the bookmarks bar and in the Bookmarks menu, as the ones on the bar itself do.
+- An extension's popup window, such as a password manager's vault or an extension's sign-in, opens as a small window of its page, at the size the extension asks for, with the site over it, instead of as another whole browser window. ⌘W closes it; it isn't brought back with the other windows after a restart, and it closes when its extension is turned off or removed. NordPass's vault and Affinity's Connect open this way.
 
 ## 1.0.4 — 27 September 2026
 

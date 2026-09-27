@@ -1292,6 +1292,11 @@ final class Browser: NSObject, ObservableObject {
     var shut = false
     /// Its window is there to be seen — on screen, or behind a hidden app.
     var isOpen: Bool { window != nil && !shut }
+    /// The extension a popup window was opened for (windows.create with
+    /// type "popup"), or nil for a browser window. Such a window is small,
+    /// the page under a thin line with its site; it is never saved, never
+    /// brought back, and never the window menus act on (see Windows.swift).
+    var extensionPopup: String?
     /// Its saved state, for a window other than the oldest (see Windows.swift).
     var record = WindowRecord()
     /// Whether its rows are the session files' — the oldest window's — or
