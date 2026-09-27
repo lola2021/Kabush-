@@ -30,6 +30,7 @@ in [ROADMAP.md](ROADMAP.md).
 - An extension can move and size a window with windows.update, as in Chrome; WebKit refused it as not implemented, and Bitwarden's pop-out logged an error each time it opened. Thanks [@dttdrv](https://github.com/dttdrv) ([#386](https://github.com/driceroland/Search/pull/386))
 - History keeps pages that differ only by http or https, by port, or by the case of their path as separate places, so localhost:3000 and localhost:4000 no longer overwrite each other; typing still matches either case. A name and password written into an address are no longer kept in the history. Thanks [@lulkebit](https://github.com/lulkebit) ([#374](https://github.com/driceroland/Search/pull/374))
 - Search › Check for Updates… follows the update as it goes: Install Update when updates are set to wait, Downloading Update… while it comes in, Download Update… when Search can't swap itself where it is, and Restart to Update once it's in place. The line at the foot of the window points there. Thanks [@lulkebit](https://github.com/lulkebit) ([#373](https://github.com/driceroland/Search/pull/373))
+- An extension that fails to install, update or reload no longer takes the working copy with it: the one you had stays, running, with its settings, and only a copy that is fully in place replaces it. Thanks [@lulkebit](https://github.com/lulkebit) ([#376](https://github.com/driceroland/Search/pull/376))
 
 ## 1.0.4 — 27 September 2026
 
