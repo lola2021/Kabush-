@@ -58,7 +58,7 @@
                                        until the page is loading
     ./bench pull DX [STEPS] [MS]       test run: two fingers DX points sideways over the page (back is +) — where it went
     ./bench keyeq CHARS CODE [shift]   test run: ⌘CHARS pressed while the page has the keyboard — who took it
-    ./bench import BROWSER [WHAT…] [--profile NAME|all] [--replace]
+    ./bench import BROWSER [WHAT…] [--profile NAME|all]
                                      test run: bookmarks, history, passwords from a made-up profile in the world's Import/
                                      (the one used most recently, unless a profile is named, or all)
     ./bench import-preview           test run: each browser found, its profiles, the one used most recently, and what
@@ -75,6 +75,8 @@
                                        any command aims it at the Nth window
     ./bench towindow ID N|new|drop X Y test run: a tab to the Nth window, a new one (Move to Window), or let
                                        go at screen point X Y as a drag out of the row
+    ./bench news PATH [notes] | on     test run: the card after an update, or every version's notes, to a
+                                       PNG; on: the card in the window
     ./bench quit                       test run: quit the app as ⌘Q does
     ./bench middle ID X Y              test run: the middle button clicked at X Y of a tab's page
     ./bench pin ID [off|home]          test run: pin a tab, unpin it, or double-click it (home)
@@ -295,9 +297,6 @@ def main(argv):
         request["new"] = len(args) == 2
     elif verb == "import":
         kinds = ("bookmarks", "history", "passwords")
-        if "--replace" in args:
-            request["replace"] = True
-            args = [a for a in args if a != "--replace"]
         if "--profile" in args:
             at = args.index("--profile")
             if at + 1 >= len(args): sys.exit("usage: bench import BROWSER [WHAT…] --profile NAME|all")
@@ -315,6 +314,12 @@ def main(argv):
     elif verb == "keyeq":
         if len(args) < 2 or any(a != "shift" for a in args[2:]): sys.exit("usage: bench keyeq CHARS CODE [shift]")
         request["chars"], request["code"], request["mods"] = args[0], int(args[1]), args[2:]
+    elif verb == "news":
+        if not args or (args[0] != "on" and len(args) > 2): sys.exit("usage: bench news PATH [notes] | news on")
+        if args[0] == "on": request["on"] = True
+        else:
+            request["path"] = os.path.abspath(args[0])
+            request["notes"] = args[1:] == ["notes"]
     elif verb == "towindow":
         if len(args) not in (2, 4) or (len(args) == 4 and args[1] != "drop"): sys.exit("usage: bench towindow ID N|new|drop X Y")
         request["id"] = args[0]

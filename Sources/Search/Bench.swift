@@ -456,6 +456,37 @@ final class Bench {
             browser.moveToWindow(tab, target)
             answer(["windows": Browsers.all.count])
 
+        case "news":
+            // The card after an update (see WhatsNew.swift), drawn off screen
+            // to a PNG — the newest release's, whatever this build's version —
+            // or every version's notes; "on" shows the card in the window.
+            guard Store.testing else { answer(["error": "news only works on a --test run"]); return }
+            guard let release = WhatsNew.releases.first else { answer(["error": "no release has a card"]); return }
+            if request["on"] as? Bool == true {
+                browser.newsShowing = true
+                answer(["showing": true])
+                return
+            }
+            guard let path = request["path"] as? String else { answer(["error": "news needs a path"]); return }
+            let root: AnyView = request["notes"] as? Bool == true
+                ? AnyView(ReleaseNotesPanel {}.padding(40).background(Palette.ground))
+                : AnyView(WhatsNewCard(release: release, prefs: browser.prefs, close: {}, notes: {}).padding(40).background(Palette.ground))
+            let host = NSHostingView(rootView: root)
+            host.frame = NSRect(origin: .zero, size: host.fittingSize)
+            let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            window.appearance = NSApp.effectiveAppearance
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                guard let picture = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { answer(["error": "nothing drawn"]); return }
+                host.cacheDisplay(in: host.bounds, to: picture)
+                do {
+                    try picture.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+                    answer(["saved": path, "size": [Int(host.bounds.width), Int(host.bounds.height)]])
+                } catch { answer(["error": error.localizedDescription]) }
+                window.contentView = nil
+            }
+
         case "quit":
             // ⌘Q, on a test run: the app ends the way it does for you, the
             // session and windows.json written on the way out.
@@ -890,7 +921,7 @@ final class Bench {
             var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles.map(\.id),
                                       "profile": profile ?? "all"]
             if what.contains("bookmarks") {
-                let (added, already) = browser.takeBookmarks(from: source, profile: profile, replacing: request["replace"] as? Bool == true)
+                let (added, already) = browser.bookmarks.take(source.bookmarks(profile: profile), from: source.name)
                 out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
                                     "top": browser.bookmarks.roots.map(\.title)]
             }
@@ -899,7 +930,6 @@ final class Bench {
                 for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
                 browser.history.settle()
                 out["places"] = places.count
-                ImportRecords.note(source.name, places: places.count)
             }
             if what.contains("passwords") {
                 let outcome = Result { try source.read(profile: profile) }
@@ -909,11 +939,6 @@ final class Bench {
                 }
                 browser.took(outcome, from: source.name)
                 out["saved"] = browser.saved.count
-            }
-            // What is now recorded from it, as the sheet shows it.
-            if let record = ImportRecords.of(source.name) {
-                out["record"] = ["bookmarks": record.bookmarks, "places": record.places, "passwords": record.passwords,
-                                 "ids": record.bookmarkIDs.count]
             }
             answer(out)
 
@@ -1923,7 +1948,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }

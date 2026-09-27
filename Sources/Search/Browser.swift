@@ -48,9 +48,7 @@ final class Browser: NSObject, ObservableObject {
             linkStatus.dismiss()
             let left = tabs.first { $0.id == old }
             left?.touch()
-            // The switcher (Settings › Tabs) keeps its order and pictures
-            // only while it is on; off, a switch records nothing for it.
-            guard prefs.mruSwitcher else { return }
+            // The switcher's order and pictures, most recently used first.
             tabSwitcher.cancel()
             if let left { tabSwitcher.left(left, alive: Set((tabs + parkedTabs).map(\.id))) }
         }
@@ -76,6 +74,10 @@ final class Browser: NSObject, ObservableObject {
     @Published var tuning = false
     /// The first-launch walk-through, over everything. Also from the menu.
     @Published var welcoming = false
+    /// What's new, once after an update (see WhatsNew.swift).
+    @Published var newsShowing = false
+    /// Every version's notes: Settings › About › What's New…
+    @Published var notesShowing = false
 
     // MARK: - bookmarks
 
@@ -120,18 +122,11 @@ final class Browser: NSObject, ObservableObject {
     /// every profile's when nil — and, behind them, the icons it had for
     /// those sites, so the menu wears them from the start instead of a
     /// letter each. Returns how many pages came over, and how many were
-    /// here already. `replacing`: what came from this browser before —
-    /// as recorded, nothing guessed — is taken out first, and these come
-    /// fresh in its place.
+    /// here already.
     @discardableResult
-    func takeBookmarks(from source: ImportSource, profile: String? = nil, replacing: Bool = false) -> (added: Int, already: Int) {
+    func takeBookmarks(from source: ImportSource, profile: String? = nil) -> (added: Int, already: Int) {
         let found = source.bookmarks(profile: profile)
-        if replacing, let earlier = ImportRecords.of(source.name), !earlier.bookmarkIDs.isEmpty {
-            bookmarks.withdraw(earlier.bookmarkIDs)
-            ImportRecords.forgetBookmarks(source.name)
-        }
-        let (count, already, ids) = bookmarks.takeNoting(found, from: source.name)
-        ImportRecords.note(source.name, bookmarks: ids, bookmarks: count)
+        let (count, already) = bookmarks.take(found, from: source.name)
         announce(
             Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
                 : count == 0 ? "The bookmarks from \(source.name) were all here already"
@@ -510,7 +505,6 @@ final class Browser: NSObject, ObservableObject {
         switch outcome {
         case .success(let found):
             let kept = keep(found)
-            ImportRecords.note(name, passwords: kept)
             announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(name) didn't give up its keychain key")
@@ -531,7 +525,6 @@ final class Browser: NSObject, ObservableObject {
                     self.history.take(place.url, title: place.title, count: place.count, last: place.last)
                 }
                 self.history.settle()
-                ImportRecords.note(source.name, places: places.count)
                 done(places.count)
             }
         }
@@ -990,6 +983,7 @@ final class Browser: NSObject, ObservableObject {
                 announce("“Let a script drive Search” was turned on outside Settings, and stays off")
             }
             welcoming = !prefs.welcomed
+            newsShowing = WhatsNew.due(prefs: prefs, welcoming: welcoming)
             // Once a day, quietly: is there a newer one?
             Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
             FormRelay.passkeysOffered = prefs.passkeys
@@ -1258,13 +1252,6 @@ final class Browser: NSObject, ObservableObject {
             }
             .store(in: &bag)
 
-        prefs.$mruSwitcher
-            .dropFirst()
-            .sink { [weak self] on in
-                if !on { self?.tabSwitcher.reset() }
-            }
-            .store(in: &bag)
-
         prefs.$passkeys
             .dropFirst()
             .sink { [weak self] on in
@@ -1523,8 +1510,8 @@ final class Browser: NSObject, ObservableObject {
         // never gone to cleared away — a row of identical empty tabs is what
         // pressing ⌘T twice, or holding it, used to leave.
         if let blank = tabs.last(where: { $0.isBlank && !$0.bench && !$0.shy }) {
-            if !tabs.isEmpty, tabs.firstIndex(where: { $0.id == blank.id }) != placeForBlank {
-                move(blank, to: placeForBlank)
+            if let end = tabs.indices.last, tabs.firstIndex(where: { $0.id == blank.id }) != end {
+                move(blank, to: end)
             }
             if activeID != blank.id { leaving() }
             activeID = blank.id
@@ -1537,7 +1524,6 @@ final class Browser: NSObject, ObservableObject {
         }
         let tab = Tab(configuration: Web.configuration(space: spaceID))
         adopt(tab)
-        if onTop { move(tab, to: placeForBlank) }
         leaving()
         activeID = tab.id
         summoning = false
@@ -2281,17 +2267,9 @@ final class Browser: NSObject, ObservableObject {
     /// them. A link from another app, with a pin in front, landed between two
     /// (#219).
     func placeForNew() -> Int {
-        if onTop { return pinnedCount }
         guard let here = tabs.firstIndex(where: { $0.id == activeID }) else { return tabs.count }
         return max(here + 1, pinnedCount)
     }
-
-    /// New tabs go to the top of the column, under the pins (Settings ›
-    /// Tabs, with the tabs in a sidebar).
-    var onTop: Bool { prefs.sidebar && prefs.newTabsOnTop }
-
-    /// Where ⌘T's tab goes: the end of the row, or the top of the column.
-    private var placeForBlank: Int { onTop ? pinnedCount : tabs.count - 1 }
 
     /// A tab made outside the row — a peek being kept — put in it at `index`.
     func insert(_ tab: Tab, at index: Int) {

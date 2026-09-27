@@ -106,14 +106,6 @@ struct KeyCombo: Codable, Hashable {
         let digit = combo.key.count == 1 && ("1"..."9").contains(combo.key)
         return digit && !combo.option && !combo.shift && (combo.command != combo.control)
     }
-
-    /// Keys an extension never has, wherever Search's own commands are:
-    /// closing, and opening a tab or a window, as Chrome keeps them. Yours
-    /// to move among Search's commands, not to give to an extension.
-    static func isBrowserOnly(_ combo: KeyCombo) -> Bool {
-        [KeyCombo("w"), KeyCombo("w", shift: true), KeyCombo("w", option: true),
-         KeyCombo("t"), KeyCombo("t", shift: true), KeyCombo("n"), KeyCombo("n", shift: true)].contains(combo)
-    }
 }
 
 /// A menu command, and the key it has unless you give it another.
@@ -229,9 +221,7 @@ final class ShortcutStore: ObservableObject {
         // ours to give stays the Mac's, whatever the file says.
         let saved = Store.settings.data(forKey: "shortcuts")
             .flatMap { try? JSONDecoder().decode([String: Override].self, from: $0) } ?? [:]
-        changed = saved.filter { id, override in
-            override.key.map { !KeyCombo.isReserved($0) && !(id.hasPrefix("ext:") && KeyCombo.isBrowserOnly($0)) } ?? true
-        }
+        changed = saved.filter { $0.value.key.map { !KeyCombo.isReserved($0) } ?? true }
     }
 
     func key(for id: String) -> KeyCombo? {
@@ -240,11 +230,7 @@ final class ShortcutStore: ObservableObject {
     }
 
     private func defaultKey(for id: String) -> KeyCombo? {
-        guard id.hasPrefix("ext:") else { return Command.named(id)?.defaultKey }
-        // What the manifest asked for, while no key of Search's is in the
-        // way: checked each time, so moving or resetting one of Search's
-        // commands frees or takes an extension's key at once.
-        return manifest[id]?.key.flatMap { keepsFromExtensions($0) ? nil : $0 }
+        id.hasPrefix("ext:") ? manifest[id]?.key : Command.named(id)?.defaultKey
     }
 
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
@@ -258,17 +244,13 @@ final class ShortcutStore: ObservableObject {
     /// A key an extension may not have: one of the Mac's, or one of
     /// Search's commands has as things stand.
     func keepsFromExtensions(_ combo: KeyCombo) -> Bool {
-        KeyCombo.isReserved(combo) || KeyCombo.isBrowserOnly(combo) || Command.all.contains { key(for: $0.id) == combo }
+        KeyCombo.isReserved(combo) || Command.all.contains { key(for: $0.id) == combo }
     }
 
-    /// A key the menus had that no command has now: the page's again —
-    /// unless you gave it to an extension's command.
+    /// A key the menus had that no command has now: the page's again.
     func isFreed(_ combo: KeyCombo) -> Bool {
-        guard Command.all.contains(where: { $0.defaultKey == combo && changed[$0.id] != nil }),
-              !Command.all.contains(where: { key(for: $0.id) == combo })
-        else { return false }
-        if #available(macOS 15.4, *), extensionCommands().contains(where: { key(for: $0.id) == combo }) { return false }
-        return true
+        Command.all.contains { $0.defaultKey == combo && changed[$0.id] != nil }
+            && !Command.all.contains { key(for: $0.id) == combo }
     }
 
     /// The command already on `combo`, other than `id`: one of Search's,
@@ -295,27 +277,21 @@ final class ShortcutStore: ObservableObject {
     func reset(_ id: String) {
         changed[id] = nil
         save()
-        applyExtensions()
+        applied(id)
     }
 
     func resetAll() {
+        let was = changed.keys
         changed = [:]
         save()
-        applyExtensions()
+        was.forEach(applied)
     }
 
     /// Only a difference from the default is kept.
     private func set(_ combo: KeyCombo?, for id: String) {
         changed[id] = combo == defaultKey(for: id) ? nil : Override(key: combo)
         save()
-        applyExtensions()
-    }
-
-    /// Every extension command's key as it now stands, handed to WebKit: a
-    /// change to one of Search's can free or take an extension's.
-    private func applyExtensions() {
-        guard #available(macOS 15.4, *) else { return }
-        for command in extensionCommands() { applied(command.id) }
+        applied(id)
     }
 
     /// An extension command's key, handed to WebKit, which matches it.
@@ -366,11 +342,10 @@ extension ShortcutStore {
     func adopt(_ context: WKWebExtensionContext, id ext: String) {
         for command in context.commands {
             let id = "ext:\(ext):\(command.id)"
-            // What WebKit holds is the manifest's on a fresh load, or an
-            // update's; once applied here, it is ours, and not taken again.
-            let current = KeyCombo(activation: command.activationKey, flags: command.modifierFlags)
-            if manifest[id] == nil || current != key(for: id) { manifest[id] = Override(key: current) }
-            applied(id)
+            let asked = KeyCombo(activation: command.activationKey, flags: command.modifierFlags)
+            let free = asked.map { !keepsFromExtensions($0) } ?? true
+            manifest[id] = Override(key: free ? asked : nil)
+            if changed[id] != nil || !free { applied(id) }
         }
     }
 }

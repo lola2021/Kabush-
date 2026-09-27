@@ -405,10 +405,6 @@ struct SettingsPanel: View {
                 Line("Hide the sidebar until the pointer reaches the edge", "The page takes the whole window; push against its \(prefs.sidePosition.rawValue) edge for the tabs. ⌘S keeps them out.") {
                     Switch(on: $prefs.sideHides)
                 }
-                Rule()
-                Line("New tabs at the top", "New tabs, and links opened beside the page, go to the top of the sidebar, under the pinned ones, instead of the bottom") {
-                    Switch(on: $prefs.newTabsOnTop)
-                }
             }
             Rule()
             Line("Tabs show", "Beside the title, and on a pinned square") {
@@ -421,10 +417,6 @@ struct SettingsPanel: View {
             Rule()
             Line("Show how far you've read", "The tab you're on fills with grey as you scroll down the page") {
                 Switch(on: $prefs.showsReading)
-            }
-            Rule()
-            Line("Recently used tab switcher", "⌃Tab shows up to ten tabs as pictures, the last one you were on first. Hold ⌃ and press Tab again to go further back, let go to switch. Off, ⌃Tab walks the row.") {
-                Switch(on: $prefs.mruSwitcher)
             }
             Rule()
             Line("Sleep tabs you aren't using", "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.") {
@@ -598,6 +590,10 @@ struct SettingsPanel: View {
                 Rule()
                 Line("Found something wrong?", "Opens a draft with the version already in it") {
                     Pill("Send Feedback") { Links.writeFeedback() }
+                }
+                Rule()
+                Line("What's new", "Every version's notes, newest first") {
+                    Pill("What's New…") { browser.notesShowing = true }
                 }
             }
 

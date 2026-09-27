@@ -112,11 +112,6 @@ final class Preferences: ObservableObject {
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
     }
-    /// ⌃Tab shows the tabs as pictures, most recently used first. Off unless
-    /// turned on; off, ⌃Tab walks the row.
-    @Published var mruSwitcher: Bool {
-        didSet { store.set(mruSwitcher, forKey: "tabs.mru") }
-    }
     /// The ad blocker. On unless turned off; there is nothing else to it.
     @Published var shielded: Bool {
         didSet { store.set(shielded, forKey: "shield") }
@@ -218,11 +213,6 @@ final class Preferences: ObservableObject {
     /// Little.swift). Off unless asked for.
     @Published var littleLinks: Bool {
         didSet { store.set(littleLinks, forKey: "links.little") }
-    }
-    /// In the column, new tabs and links opened beside the page go to the
-    /// top of the loose tabs, under the pins, as in Arc. Off unless asked for.
-    @Published var newTabsOnTop: Bool {
-        didSet { store.set(newTabsOnTop, forKey: "tabs.top") }
     }
     /// The bookmarks bar above the page (see BookmarksBar.swift). Off
     /// unless asked for.
@@ -330,7 +320,6 @@ final class Preferences: ObservableObject {
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         lazyTabs = store.bool(forKey: "tabs.lazy")
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
-        mruSwitcher = store.bool(forKey: "tabs.mru")
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")
         keepsSignIns = keeps
@@ -384,7 +373,6 @@ final class Preferences: ObservableObject {
         peeksLinks = store.object(forKey: "links.peek") as? Bool ?? true
         littleLinks = store.bool(forKey: "links.little")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
-        newTabsOnTop = store.bool(forKey: "tabs.top")
         let links = store.object(forKey: "links.show") as? Bool ?? true
         showsLinks = links
         HoveredLink.on = links

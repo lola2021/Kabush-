@@ -497,6 +497,19 @@ struct ContentView: View {
         if browser.bringingIn != nil {
             sheet { ImportPanel(browser: browser) } close: { browser.bringingIn = nil }
         }
+        // What's new, once after an update, and every version's notes
+        // (see WhatsNew.swift).
+        if browser.newsShowing, let release = WhatsNew.current {
+            sheet {
+                WhatsNewCard(release: release, prefs: browser.prefs, close: { browser.newsShowing = false }) {
+                    browser.newsShowing = false
+                    browser.notesShowing = true
+                }
+            } close: { browser.newsShowing = false }
+        }
+        if browser.notesShowing {
+            sheet { ReleaseNotesPanel { browser.notesShowing = false } } close: { browser.notesShowing = false }
+        }
         if browser.reviewing {
             // No dimming for this one: the whole point is to keep looking at
             // the page while the list offers to put things back on it.
@@ -581,6 +594,8 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.welcoming)
             .animation(Motion.settle, value: browser.bookmarking)
             .animation(Motion.settle, value: browser.managing)
+            .animation(Motion.settle, value: browser.newsShowing)
+            .animation(Motion.settle, value: browser.notesShowing)
             .animation(Motion.settle, value: browser.bringingIn != nil)
             .animation(Motion.settle, value: browser.reviewing)
         .onAppear {
@@ -979,6 +994,14 @@ struct ContentView: View {
                 withAnimation(Motion.glide) { browser.makingSpace = false }
                 return true
             }
+            if browser.notesShowing {
+                browser.notesShowing = false
+                return true
+            }
+            if browser.newsShowing {
+                browser.newsShowing = false
+                return true
+            }
             if browser.tuning {
                 browser.tuning = false
                 return true
@@ -1047,15 +1070,15 @@ struct ContentView: View {
         // round to the first again, ⌃⇧Tab the other way — the keys every
         // other browser uses for that.
         //
-        // With the switcher on (Settings › Tabs), ⌃Tab brings it up instead,
-        // most recently used first — whenever there is nothing over the page
-        // it would have to cover; otherwise it walks the row as before.
+        // ⌃Tab brings up the switcher instead, most recently used first —
+        // whenever there is nothing over the page it would have to cover;
+        // otherwise it walks the row as before.
         //
         // While an address is being typed, the list under the field is what
         // there is to move through, and Return takes whatever the walk landed on.
         if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
             if flags.contains(.control) {
-                if browser.prefs.mruSwitcher, canSwitchTabs(event) {
+                if canSwitchTabs(event) {
                     // A Tab held down doesn't race through them.
                     if !event.isARepeat { browser.switchTabs(backwards: flags.contains(.shift)) }
                     return true

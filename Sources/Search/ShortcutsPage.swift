@@ -159,7 +159,6 @@ private struct KeyBox: View {
         // An extension's command takes a key as its manifest would: one
         // that types a character, not an arrow or a function key.
         guard !id.hasPrefix("ext:") || combo.key.count == 1 else { return say("Not for an extension") }
-        guard !id.hasPrefix("ext:") || !KeyCombo.isBrowserOnly(combo) else { return say("Not for an extension") }
         if store.owner(of: combo, except: id) != nil, taking != combo {
             taking = combo
             return

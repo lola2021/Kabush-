@@ -3714,8 +3714,7 @@ enum ExtensionShims {
 @MainActor
 enum ExtensionAuth {
     private static var waiting: [String: (tab: Tab.ID, finish: (Result<URL, Error>) -> Void)] = [:]
-    /// One per flow: whether its tab is still somewhere.
-    private static var watches: [String: Timer] = [:]
+    private static var watch: AnyCancellable?
 
     struct Declined: LocalizedError {
         var errorDescription: String? { "The user did not approve access." }
@@ -3727,27 +3726,13 @@ enum ExtensionAuth {
             waiting[id]?.finish(.failure(Declined()))
             let tab = browser.open(url, foreground: true)
             waiting[id] = (tab.id, { result in continuation.resume(with: result) })
-            // Closing the tab is saying no. Moved to another window, or to
-            // a space not on screen, it is still there.
-            watches[id]?.invalidate()
-            watches[id] = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-                MainActor.assumeIsolated {
-                    guard let entry = waiting[id], entry.tab == tab.id else {
-                        watches.removeValue(forKey: id)?.invalidate()
-                        return
-                    }
-                    guard !exists(entry.tab) else { return }
-                    waiting[id] = nil
-                    watches.removeValue(forKey: id)?.invalidate()
+            // Closing the tab is saying no.
+            watch = browser.$tabs.sink { tabs in
+                for (key, entry) in waiting where !tabs.contains(where: { $0.id == entry.tab }) {
+                    waiting[key] = nil
                     entry.finish(.failure(Declined()))
                 }
             }
-        }
-    }
-
-    private static func exists(_ id: Tab.ID) -> Bool {
-        Browsers.all.contains { browser in
-            browser.tabs.contains { $0.id == id } || browser.parked.values.contains { $0.tabs.contains { $0.id == id } }
         }
     }
 
@@ -3767,12 +3752,8 @@ enum ExtensionAuth {
         entry.finish(.success(url))
         // The popup, when the answer came in one, goes with the flow's tab:
         // left behind, it would hold a redirect that never loads.
-        watches.removeValue(forKey: id)?.invalidate()
         if from.id != entry.tab { browser.close(from) }
-        // The flow's tab, in whichever window it is now.
-        for home in Browsers.all {
-            if let tab = home.tabs.first(where: { $0.id == entry.tab }) { home.close(tab) }
-        }
+        if let tab = browser.tabs.first(where: { $0.id == entry.tab }) { browser.close(tab) }
         return true
     }
 
