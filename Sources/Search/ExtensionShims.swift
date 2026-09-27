@@ -361,6 +361,15 @@ enum ExtensionShims {
         if (!callback) return promise;
         promise.then((value) => callback(value), (error) => withLastError(error, callback));
       };
+      // Where a tab is, as Search can find it: its place in its window's row
+      // and that window's frame. WebKit's window numbers mean nothing to
+      // Search, and windows.getAll gives the frames they go with.
+      const frames = async () => {
+        const all = chrome.windows && typeof chrome.windows.getAll === "function"
+          ? await Promise.resolve(chrome.windows.getAll()).catch(() => []) : [];
+        return new Map((all || []).map((w) => [w.id, { left: w.left, top: w.top, width: w.width, height: w.height }]));
+      };
+      const placeOf = (t, known) => ({ i: t.index, w: known.get(t.windowId) });
       const event = () => {
         const listeners = new Set();
         return {
@@ -1452,7 +1461,7 @@ enum ExtensionShims {
           const out = [];
           for (const id of Array.isArray(ids) ? ids : [ids]) {
             const tab = await chrome.tabs.get(id);
-            await native(api, [tab.index, extra]);
+            await native(api, [placeOf(tab, await frames()), extra]);
             await settle();
             out.push(await chrome.tabs.get(id).catch(() => tab));
           }
@@ -1464,7 +1473,10 @@ enum ExtensionShims {
           if (!callback) return p;
           p.then((v) => callback(v), (e) => withLastError(e, callback));
         };
-        const indexes = (ids) => Promise.all((Array.isArray(ids) ? ids : [ids]).map((id) => chrome.tabs.get(id).then((t) => t.index)));
+        const indexes = async (ids) => {
+          const known = await frames();
+          return Promise.all((Array.isArray(ids) ? ids : [ids]).map((id) => chrome.tabs.get(id).then((t) => placeOf(t, known))));
+        };
         fill("tabs", {
           // Into a group, a new one or one named by its number, or out of
           // one. A group left with no tab is gone, as in Chrome.
@@ -1492,7 +1504,8 @@ enum ExtensionShims {
             : byIndex("tabs.discard")(id)),
           highlight: withCallback(async (info = {}) => {
             const first = Array.isArray(info.tabs) ? info.tabs[0] : info.tabs;
-            await native("tabs.activate", [first]);
+            const window = info.windowId ?? (await chrome.windows.getCurrent()).id;
+            await native("tabs.activate", [{ i: first, w: (await frames()).get(window) }]);
             await settle();
             return chrome.windows ? chrome.windows.getCurrent({ populate: true }) : undefined;
           }),
@@ -1738,8 +1751,8 @@ enum ExtensionShims {
           const blind = seesTabs ? tabs.filter((t) => !t.url && t.index >= 0) : [];
           const placed = seesGroups ? tabs.filter((t) => t.index >= 0) : [];
           if (!blind.length && !placed.length) return null;
-          return Promise.all([
-            blind.length && native("tabs.describe", [blind.map((t) => t.index)]).then((info) => {
+          return frames().then((known) => Promise.all([
+            blind.length && native("tabs.describe", [blind.map((t) => placeOf(t, known))]).then((info) => {
               blind.forEach((t, i) => {
                 const d = info && info[i];
                 if (!d) return;
@@ -1750,12 +1763,12 @@ enum ExtensionShims {
                 } catch (e) {}
               });
             }, () => {}),
-            placed.length && native("tabs.groups", [placed.map((t) => t.index)]).then((ids) => {
+            placed.length && native("tabs.groups", [placed.map((t) => placeOf(t, known))]).then((ids) => {
               placed.forEach((t, i) => {
                 if (ids && typeof ids[i] === "number") try { t.groupId = ids[i]; } catch (e) {}
               });
             }, () => {}),
-          ]);
+          ]));
         };
         const tabsIn = (value) => Array.isArray(value) ? value.flatMap(tabsIn)
           : isTab(value) ? [value] : value && Array.isArray(value.tabs) ? value.tabs : [];
@@ -2774,6 +2787,23 @@ enum ExtensionShims {
     /// A tab's icon for favIconUrl: the picture the tab wears, as a small
     /// PNG. Search keeps icons as pictures, not addresses, and Chrome's
     /// favIconUrl may be a data: URL. Made once per site and kept.
+    /// A tab as the shim names it: `i`, its place in its window's row as
+    /// extensions see it, and `w`, that window's frame from windows.getAll()
+    /// (see Extensions.tab(windowFrame:index:)). A bare number, or no frame,
+    /// is only understood while there is one window.
+    private static func located(_ place: Any?, owner: Extensions) -> Tab? {
+        let spec = place as? [String: Any]
+        guard let index = (place as? NSNumber)?.intValue ?? (spec?["i"] as? NSNumber)?.intValue else { return nil }
+        let number = { (value: Any?) in (value as? NSNumber)?.doubleValue }
+        if let w = spec?["w"] as? [String: Any], let left = number(w["left"]), let top = number(w["top"]),
+           let width = number(w["width"]), let height = number(w["height"]) {
+            return owner.tab(windowFrame: CGRect(x: left, y: top, width: width, height: height), index: index)
+        }
+        guard Browsers.all.count <= 1 else { return nil }
+        let visible = owner.visibleTabs
+        return visible.indices.contains(index) ? visible[index] : nil
+    }
+
     private static var favIcons: [String: String] = [:]
     static func forgetIcons() { favIcons.removeAll() }
 
@@ -3266,10 +3296,9 @@ enum ExtensionShims {
 
         // MARK: tabs, by where they are in the row
         case "tabs.describe":
-            let visible = owner.visibleTabs
-            return ((first as? [Int]) ?? []).map { index -> Any in
-                guard visible.indices.contains(index) else { return NSNull() }
-                let tab = visible[index]
+            let places: [Any] = first as? [Any] ?? []
+            return places.map { place -> Any in
+                guard let tab = located(place, owner: owner) else { return NSNull() }
                 // Another extension's page stays blank, as WebKit keeps it
                 // (see the refusal in Extensions.load); its own are its own.
                 if let url = tab.address, let scheme = url.scheme?.lowercased(),
@@ -3281,9 +3310,8 @@ enum ExtensionShims {
                 return described
             }
         case "tabs.move", "tabs.discard", "tabs.activate":
-            let visible = owner.visibleTabs
-            guard let from = first as? Int, visible.indices.contains(from) else { throw Unsupported(what: "No tab there") }
-            let tab = visible[from]
+            guard let tab = located(first, owner: owner), let browser = owner.browser(of: tab) else { throw Unsupported(what: "No tab there") }
+            let visible = owner.visibleTabs(of: browser)
             switch api {
             case "tabs.move":
                 let wanted = args.dropFirst().first as? Int ?? -1
@@ -3410,10 +3438,10 @@ enum ExtensionShims {
         // Only while they are on (Settings › Tabs): off, they sleep, for
         // extensions as on screen. A group without a tab is never shown.
         case "tabs.groups":
-            let visible = owner.visibleTabs
-            return ((first as? [Int]) ?? []).map { index -> Int in
-                guard browser.prefs.usesTabGroups, visible.indices.contains(index),
-                      let group = browser.group(of: visible[index]) else { return -1 }
+            let places: [Any] = first as? [Any] ?? []
+            return places.map { place -> Int in
+                guard browser.prefs.usesTabGroups, let tab = located(place, owner: owner),
+                      let home = owner.browser(of: tab), let group = home.group(of: tab) else { return -1 }
                 return TabGroup.number(group)
             }
         case "tabGroups.query":
@@ -3435,9 +3463,13 @@ enum ExtensionShims {
             throw Unsupported(what: "Search can't move a tab group for an extension")
         case "tabs.group":
             guard browser.prefs.usesTabGroups else { throw Unsupported(what: "Tab groups are off in Search's settings") }
-            let visible = owner.visibleTabs
-            let tabs = ((first as? [Int]) ?? []).compactMap { visible.indices.contains($0) ? visible[$0] : nil }
+            let places: [Any] = first as? [Any] ?? []
+            let tabs = places.compactMap { located($0, owner: owner) }
             guard !tabs.isEmpty else { throw Unsupported(what: "No tabs to group") }
+            // A group is one window's, as in Chrome.
+            guard let browser = owner.browser(of: tabs[0]), tabs.allSatisfy({ owner.browser(of: $0) === browser }) else {
+                throw Unsupported(what: "Tabs from different windows can't share a group")
+            }
             // Pins and private tabs are never in a group in Search.
             guard tabs.allSatisfy({ $0.pin == nil && !$0.shy }) else {
                 throw Unsupported(what: "Pinned and private tabs can't be grouped")
@@ -3454,9 +3486,10 @@ enum ExtensionShims {
             return TabGroup.number(target)
         case "tabs.ungroup":
             guard browser.prefs.usesTabGroups else { return nil }
-            let visible = owner.visibleTabs
-            let tabs = ((first as? [Int]) ?? []).compactMap { visible.indices.contains($0) ? visible[$0] : nil }
-            for tab in tabs { browser.move(tab, toGroup: nil) }
+            let places: [Any] = first as? [Any] ?? []
+            for tab in places.compactMap({ located($0, owner: owner) }) {
+                owner.browser(of: tab)?.move(tab, toGroup: nil)
+            }
             return nil
 
         // MARK: identity
