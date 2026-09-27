@@ -51,6 +51,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The floating video moves, or sizes from its corner, on the first click: the first press on the picture used to go only to making its window the one in front, and it moved on the second. Thanks [@teh33](https://github.com/teh33) ([#279](https://github.com/driceroland/Search/pull/279))
 - The download button in the bar over a PDF saves the PDF to your downloads folder, or asks where first when Settings › Downloads says to, and lists it in Downloads. It did nothing. Thanks [@Aaditya2605](https://github.com/Aaditya2605) ([#290](https://github.com/driceroland/Search/pull/290), [#284](https://github.com/driceroland/Search/issues/284))
 - Clicking a bookmark whose address is missing or can't be read, which an extension can write and a bookmarks file can lose, does nothing instead of closing Search, as its line in the Bookmarks menu already did. Thanks [@Hyp4tia](https://github.com/Hyp4tia) ([#234](https://github.com/driceroland/Search/pull/234))
+- A pinned extension's popup opens from its button after you move the tabs from across the top to the column, or back, instead of from somewhere else in the window: the row being taken away kept the button's place for itself. Thanks [@kinnrai](https://github.com/kinnrai) ([#254](https://github.com/driceroland/Search/pull/254))
 
 ## 1.0.3 — 24 September 2026
 
