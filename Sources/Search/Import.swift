@@ -68,6 +68,7 @@ enum Chromium {
         Source(name: "Edge", folder: "Microsoft Edge", service: "Microsoft Edge Safe Storage", account: "Microsoft Edge", app: "Microsoft Edge.app"),
         Source(name: "Vivaldi", folder: "Vivaldi", service: "Vivaldi Safe Storage", account: "Vivaldi", app: "Vivaldi.app"),
         Source(name: "Chromium", folder: "Chromium", service: "Chromium Safe Storage", account: "Chromium", app: "Chromium.app"),
+        Source(name: "Helium", folder: "net.imput.helium", service: "Helium Storage Key", account: "Helium", app: "Helium.app"),
     ]
 
     /// Where browsers keep their data: ~/Library/Application Support. A test
