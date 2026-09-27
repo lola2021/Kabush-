@@ -62,12 +62,14 @@ final class Browser: NSObject, ObservableObject {
         announce("Bookmarked")
     }
 
-    /// Another browser's bookmarks, folders and all — and, behind them, the
-    /// icons it had for those sites, so the menu wears them from the start
-    /// instead of a letter each. Returns how many pages came over.
+    /// Another browser's bookmarks, folders and all — one profile's, or
+    /// every profile's when nil — and, behind them, the icons it had for
+    /// those sites, so the menu wears them from the start instead of a
+    /// letter each. Returns how many pages came over, and how many were
+    /// here already.
     @discardableResult
-    func takeBookmarks(from source: ImportSource) -> Int {
-        let found = source.bookmarks
+    func takeBookmarks(from source: ImportSource, profile: String? = nil) -> (added: Int, already: Int) {
+        let found = source.bookmarks(profile: profile)
         let (count, already) = bookmarks.take(found, from: source.name)
         announce(
             Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
@@ -77,14 +79,18 @@ final class Browser: NSObject, ObservableObject {
         )
         let urls = Bookmarks.urls(found)
         DispatchQueue.global(qos: .utility).async {
-            let icons = source.icons(for: urls)
+            let icons = source.icons(profile: profile, for: urls)
             Task { @MainActor in
                 for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
                 self.objectWillChange.send()
             }
         }
-        return count
+        return (count, already)
     }
+
+    /// The "Bring things over" sheet, open while set: the browser it
+    /// starts on by name, or "" for the first one found.
+    @Published var bringingIn: String?
 
     /// ⇧⌘S. The same tabs, down the left or across the top.
     func toggleSidebar() {
@@ -407,19 +413,28 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    /// What came back from another browser's store, put in the keychain.
+    /// What came back from another browser's store, put in the keychain,
+    /// with the sites it was told never to ask about. Saving one already
+    /// kept updates it, so bringing the same in again adds nothing twice.
+    /// Returns how many were kept.
+    func keep(_ found: Chromium.Found) -> Int {
+        var kept = 0
+        for login in found.logins
+        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
+            kept += 1
+        }
+        var never = Vault.never
+        found.never.forEach { never.insert($0) }
+        Vault.never = never
+        relist()
+        return kept
+    }
+
+    /// The same, said as it lands.
     func took(_ outcome: Result<Chromium.Found, Error>, from name: String) {
         switch outcome {
         case .success(let found):
-            var kept = 0
-            for login in found.logins
-            where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
-                kept += 1
-            }
-            var never = Vault.never
-            found.never.forEach { never.insert($0) }
-            Vault.never = never
-            relist()
+            let kept = keep(found)
             announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(name) didn't give up its keychain key")
@@ -432,9 +447,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// The other browser's history, into this one's. Off the main thread for
     /// the reading; the merge itself is a moment.
-    func takePlaces(from source: ImportSource, then done: @escaping (Int) -> Void) {
+    func takePlaces(from source: ImportSource, profile: String? = nil, then done: @escaping (Int) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let places = source.places()
+            let places = source.places(profile: profile)
             DispatchQueue.main.async {
                 for place in places {
                     self.history.take(place.url, title: place.title, count: place.count, last: place.last)

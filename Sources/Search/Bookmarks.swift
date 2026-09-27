@@ -40,7 +40,7 @@ final class Bookmarks: ObservableObject {
     /// How many sites, folders included.
     var count: Int { Bookmarks.count(roots) }
 
-    static func count(_ nodes: [Bookmark]) -> Int {
+    nonisolated static func count(_ nodes: [Bookmark]) -> Int {
         nodes.reduce(0) { $0 + ($1.isFolder ? count($1.children ?? []) : 1) }
     }
 
@@ -570,8 +570,9 @@ struct BookmarksPanel: View {
                 Text("Bring in from")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                ForEach(ImportSource.installed()) { source in
-                    Pill(source.name) { browser.takeBookmarks(from: source) }
+                Pill("Bring in…") {
+                    browser.bookmarking = false
+                    browser.bringingIn = ""
                 }
                 Pill("File…") { browser.importFile() }
                 Spacer()

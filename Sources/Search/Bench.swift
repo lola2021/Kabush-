@@ -444,6 +444,7 @@ final class Bench {
                 "history": browser.recalling,
                 "downloads": browser.hoarding,
                 "bookmarks": browser.bookmarking,
+                "import": browser.bringingIn != nil,
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
                 "offering": browser.offering != nil,
@@ -750,29 +751,67 @@ final class Bench {
                 answer(["found": found.map(\.name)])
                 return
             }
+            // The profile used most recently unless another is named, by its
+            // folder or the name the browser gives it; "all" for every one.
+            let profile: String?
+            switch request["profile"] as? String {
+            case nil: profile = source.usual
+            case "all": profile = nil
+            case let name?:
+                guard let match = source.profiles.first(where: { $0.id == name || $0.name == name }) else {
+                    answer(["error": "no profile “\(name)” in \(source.name)", "profiles": source.profiles.map(\.id)])
+                    return
+                }
+                profile = match.id
+            }
             let what = request["what"] as? [String] ?? []
-            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles]
+            var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles.map(\.id),
+                                      "profile": profile ?? "all"]
             if what.contains("bookmarks") {
-                let (added, already) = browser.bookmarks.take(source.bookmarks, from: source.name)
+                let (added, already) = browser.bookmarks.take(source.bookmarks(profile: profile), from: source.name)
                 out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
                                     "top": browser.bookmarks.roots.map(\.title)]
             }
             if what.contains("history") {
-                let places = source.places()
+                let places = source.places(profile: profile)
                 for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
                 browser.history.settle()
                 out["places"] = places.count
             }
             if what.contains("passwords") {
-                let outcome = Result { try source.read() }
+                let outcome = Result { try source.read(profile: profile) }
                 switch outcome {
-                case .success(let read): out["read"] = read.logins.count
+                case .success(let read): out["read"] = read.logins.count; out["skipped"] = read.skipped
                 case .failure(let error): out["error"] = "\(error)"
                 }
                 browser.took(outcome, from: source.name)
                 out["saved"] = browser.saved.count
             }
             answer(out)
+
+        case "import-preview":
+            // What the sheet counts as it opens, for every browser found:
+            // its profiles, the one used most recently, and what that one
+            // and all of them hold — through the same call the sheet makes,
+            // which never asks for a key. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "import-preview only works on a --test run"]); return }
+            let asked = Chromium.keyAsks
+            func counts(_ preview: ImportSource.Preview) -> [String: Any] {
+                ["bookmarks": preview.bookmarks, "places": preview.places, "passwords": preview.passwords,
+                 "extensions": preview.extensions]
+            }
+            let found = ImportSource.installed().map { source -> [String: Any] in
+                let usual = source.usual
+                return ["name": source.name,
+                        "profiles": source.profiles.map { ["id": $0.id, "name": $0.name] },
+                        "default": usual ?? "",
+                        "counts": counts(source.preview(profile: usual)),
+                        "all": counts(source.preview(profile: nil))]
+            }
+            // keyAsked: by this count; keyAskedEver: by anything since launch,
+            // the sheet opening included.
+            answer(["browsers": found, "safari": ImportSource.safari, "keyAsked": Chromium.keyAsks - asked,
+                    "keyAskedEver": Chromium.keyAsks])
 
         case "import-file":
             // A file another browser exported, through the same call the
@@ -1364,6 +1403,10 @@ final class Bench {
             if let on = request["history"] as? Bool { browser.recalling = on }
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
             if let on = request["bookmarks"] as? Bool { browser.bookmarking = on }
+            // The Bring things over sheet: on, off, or on at a browser by name.
+            if let text = request["import"] as? String {
+                browser.bringingIn = ["off", "false", "0", "no"].contains(text) ? nil : ["on", "true", "1", "yes"].contains(text) ? "" : text
+            }
             if let on = request["hidden"] as? Bool { browser.reviewing = on }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["pages120"] as? Bool { browser.prefs.fastPages = on }
@@ -1395,7 +1438,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "fill", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "fill", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }

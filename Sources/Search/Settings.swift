@@ -363,7 +363,7 @@ struct SettingsPanel: View {
                 Line("Bring yours in", "From another browser on this Mac — nothing leaves it") {
                     Pill("Import…") {
                         browser.tuning = false
-                        browser.managing = true
+                        browser.bringingIn = ""
                     }
                 }
             }

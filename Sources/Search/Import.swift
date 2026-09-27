@@ -45,10 +45,35 @@ enum Chromium {
             }
         }
 
-        /// Every profile's passwords file.
-        var files: [URL] {
-            profiles.map { $0.appendingPathComponent("Login Data") }
+        /// The profiles to read: the one whose folder is named, or every
+        /// one when nil, which is "All profiles".
+        func profiles(only: String?) -> [URL] {
+            guard let only else { return profiles }
+            return profiles.filter { $0.lastPathComponent == only }
+        }
+
+        /// Every profile's passwords file, or the one profile's.
+        func files(only: String? = nil) -> [URL] {
+            profiles(only: only).map { $0.appendingPathComponent("Login Data") }
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
+        }
+
+        /// What the browser says of its profiles in "Local State", beside
+        /// them: the name each folder goes by ("Work", "Person 1"), and the
+        /// folder used last — "last_used", or failing that the first of
+        /// "last_active_profiles".
+        var localState: (names: [String: String], last: [String]) {
+            let file = root.appendingPathComponent("Local State")
+            guard let data = try? Data(contentsOf: file),
+                  let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let profile = top["profile"] as? [String: Any]
+            else { return ([:], []) }
+            var names: [String: String] = [:]
+            for (folder, info) in profile["info_cache"] as? [String: Any] ?? [:] {
+                if let name = (info as? [String: Any])?["name"] as? String, !name.isEmpty { names[folder] = name }
+            }
+            let last = [profile["last_used"] as? String].compactMap { $0 } + (profile["last_active_profiles"] as? [String] ?? [])
+            return (names, last)
         }
 
         /// Whether the app is in /Applications or ~/Applications.
@@ -111,23 +136,31 @@ enum Chromium {
         var logins: [Login]
         /// Sites the other browser was told never to ask about.
         var never: [String]
+        /// Passwords left behind for having no site to go with.
+        var skipped = 0
     }
 
-    static func read(_ source: Source) throws -> Found {
+    /// The passwords of one profile, or of all of them when `profile` is
+    /// nil. The key is asked for once, here, whichever it is.
+    static func read(_ source: Source, profile: String? = nil) throws -> Found {
         guard let passphrase = safeStorage(source) else { throw Trouble.noPassphrase }
         let key = stretch(passphrase)
 
         var logins: [Login] = []
         var never: [String] = []
+        var skipped = 0
         var seen = Set<String>()
         var readAny = false
 
-        for file in source.files {
+        for file in source.files(only: profile) {
             guard let rows = try? rows(in: file) else { continue }
             readAny = true
             for row in rows {
                 let host = Vault.host(of: row.origin)
-                guard !host.isEmpty else { continue }
+                guard !host.isEmpty else {
+                    if !row.never, !row.blob.isEmpty { skipped += 1 }
+                    continue
+                }
                 if row.never {
                     never.append(host)
                     continue
@@ -140,16 +173,16 @@ enum Chromium {
             }
         }
         guard readAny else { throw Trouble.unreadable }
-        return Found(logins: logins, never: never)
+        return Found(logins: logins, never: never, skipped: skipped)
     }
 
     // MARK: - what they kept
 
     /// The other browser's bookmarks: the bar first, then anything filed
     /// elsewhere, folders and all. Chromium keeps them as one JSON file.
-    static func bookmarks(in source: Source) -> [Bookmark] {
+    static func bookmarks(in source: Source, profile: String? = nil) -> [Bookmark] {
         var out: [Bookmark] = []
-        for profile in source.profiles {
+        for profile in source.profiles(only: profile) {
             let marks = profile.appendingPathComponent("Bookmarks")
             guard let data = try? Data(contentsOf: marks),
                   let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -188,7 +221,7 @@ enum Chromium {
     /// The other browser's icons for the given pages, host by host: the
     /// largest bitmap it kept for the page itself, or failing that for the
     /// site's front door. Read from a copy of its "Favicons" file.
-    static func icons(in source: Source, for urls: [URL], limit: Int = 400) -> [String: Data] {
+    static func icons(in source: Source, profile: String? = nil, for urls: [URL], limit: Int = 400) -> [String: Data] {
         var out: [String: Data] = [:]
         var wanted: [(host: String, url: URL)] = []
         var seen = Set<String>()
@@ -199,7 +232,7 @@ enum Chromium {
         }
         guard !wanted.isEmpty else { return out }
 
-        for profile in source.profiles {
+        for profile in source.profiles(only: profile) {
             let icons = profile.appendingPathComponent("Favicons")
             guard FileManager.default.fileExists(atPath: icons.path),
                   let copy = try? Snapshot(of: icons)
@@ -250,9 +283,9 @@ enum Chromium {
 
     /// The other browser's history — what it takes to finish an address on
     /// the first day. Same file rules as the passwords: a copy, read once.
-    static func places(in source: Source, limit: Int = 3000) -> [Place] {
+    static func places(in source: Source, profile: String? = nil, limit: Int = 3000) -> [Place] {
         var out: [Place] = []
-        for profile in source.profiles {
+        for profile in source.profiles(only: profile) {
             let history = profile.appendingPathComponent("History")
             guard FileManager.default.fileExists(atPath: history.path) else { continue }
             out += (try? placeRows(in: history, limit: limit)) ?? []
@@ -297,9 +330,102 @@ enum Chromium {
         return out
     }
 
+    // MARK: - counting, before anything is brought
+
+    /// How much there is to bring from one profile, or all of them, read
+    /// from the files alone: bookmarks counted from the file, places up to
+    /// the limit, and passwords as rows with something in them that aren't
+    /// a site marked never. No key is asked for and nothing is decrypted,
+    /// so it never prompts — safeStorage is not called from here.
+    static func preview(of source: Source, profile: String?, limit: Int = 3000) -> ImportSource.Preview {
+        let files = source.profiles(only: profile)
+        let places = files.reduce(0) { sum, folder in
+            sum + count("""
+            SELECT COUNT(*) FROM urls WHERE hidden = 0 AND visit_count > 0
+            AND (url LIKE 'http:%' OR url LIKE 'https:%')
+            """, in: folder.appendingPathComponent("History"))
+        }
+        let passwords = source.files(only: profile).reduce(0) { sum, file in
+            sum + count("SELECT COUNT(*) FROM logins WHERE blacklisted_by_user = 0 AND length(password_value) > 0", in: file)
+        }
+        return ImportSource.Preview(
+            bookmarks: Bookmarks.count(bookmarks(in: source, profile: profile)),
+            places: min(limit, places),
+            passwords: passwords,
+            extensions: extensions(in: source, profile: profile)
+        )
+    }
+
+    /// One number from a copy of a SQLite file; nothing for a file that
+    /// isn't there or won't answer.
+    static func count(_ sql: String, in file: URL) -> Int {
+        guard FileManager.default.fileExists(atPath: file.path), let copy = try? Snapshot(of: file) else { return 0 }
+        defer { withExtendedLifetime(copy) {} }
+        var db: OpaquePointer?
+        guard sqlite3_open_v2(copy.file.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db else { return 0 }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else { return 0 }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW ? Int(sqlite3_column_int64(statement, 0)) : 0
+    }
+
+    /// The extensions a profile has from the Chrome Web Store, by id, to be
+    /// installed fresh from the store — never copied from here. Its
+    /// Preferences and Secure Preferences say where each came from: only
+    /// ones the person added from the store count, not ones built in,
+    /// loaded unpacked, put there by a policy or by the browser itself, nor
+    /// themes. A profile without either file has only its Extensions/
+    /// folders to go by.
+    static func extensions(in source: Source, profile: String?) -> [String] {
+        var out: [String] = []
+        for folder in source.profiles(only: profile) {
+            var settings: [String: [String: Any]] = [:]
+            for name in ["Preferences", "Secure Preferences"] {
+                guard let data = try? Data(contentsOf: folder.appendingPathComponent(name)),
+                      let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let all = (top["extensions"] as? [String: Any])?["settings"] as? [String: Any]
+                else { continue }
+                for (id, entry) in all {
+                    guard let entry = entry as? [String: Any] else { continue }
+                    settings[id, default: [:]].merge(entry) { kept, _ in kept }
+                }
+            }
+            var ids: [String]
+            if settings.isEmpty {
+                ids = (try? FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("Extensions").path)) ?? []
+            } else {
+                ids = settings.compactMap { id, entry in
+                    // Location 1 is Chromium's "internal": added by the person.
+                    guard entry["location"] as? Int == 1 || entry["from_webstore"] as? Bool == true,
+                          entry["was_installed_by_default"] as? Bool != true,
+                          entry["was_installed_by_oem"] as? Bool != true
+                    else { return nil }
+                    let manifest = entry["manifest"] as? [String: Any] ?? [:]
+                    guard manifest["theme"] == nil else { return nil }
+                    // From another store, Edge's say: not the Chrome Web Store's to give.
+                    if let update = manifest["update_url"] as? String, !update.contains("google.com") { return nil }
+                    return id
+                }
+            }
+            for id in ids.sorted() where isStoreID(id) && !out.contains(id) { out.append(id) }
+        }
+        return out
+    }
+
+    /// Thirty-two letters from a to p: the shape of a store extension's id.
+    private static func isStoreID(_ text: String) -> Bool {
+        text.count == 32 && text.allSatisfy { ("a"..."p").contains($0) }
+    }
+
     // MARK: - the key
 
+    /// How many times the key was asked for, for the bench to see that
+    /// counting never does.
+    static private(set) var keyAsks = 0
+
     private static func safeStorage(_ source: Source) -> String? {
+        keyAsks += 1
         // A test run's made-up browser keeps its key beside its profiles,
         // not in the keychain.
         if Store.testing {
@@ -457,6 +583,52 @@ enum Mozilla {
                 return da > db
             }
         }
+
+        /// The one profile's places.sqlite, by its folder's name, or every
+        /// one when nil.
+        func files(only: String?) -> [URL] {
+            guard let only else { return files }
+            return files.filter { $0.deletingLastPathComponent().lastPathComponent == only }
+        }
+
+        /// What profiles.ini says, beside the profiles or one folder up:
+        /// the name each profile folder goes by, and the one in use — the
+        /// Install section's Default, which is the one the browser itself
+        /// opens, or else the profile marked Default=1.
+        var ini: (names: [String: String], usual: String?) {
+            var names: [String: String] = [:]
+            var install: String?
+            var marked: String?
+            for folder in folders {
+                let root = Chromium.base.appendingPathComponent(folder, isDirectory: true)
+                for file in [root, root.deletingLastPathComponent()].map({ $0.appendingPathComponent("profiles.ini") }) {
+                    guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                    var section = ""
+                    var fields: [String: String] = [:]
+                    func close() {
+                        let path = fields["Path"].map { URL(fileURLWithPath: $0).lastPathComponent }
+                        if section.hasPrefix("Install"), let at = fields["Default"] {
+                            install = install ?? URL(fileURLWithPath: at).lastPathComponent
+                        } else if section.hasPrefix("Profile"), let path {
+                            if let name = fields["Name"], !name.isEmpty { names[path] = name }
+                            if fields["Default"] == "1" { marked = marked ?? path }
+                        }
+                        fields = [:]
+                    }
+                    for raw in text.components(separatedBy: .newlines) {
+                        let line = raw.trimmingCharacters(in: .whitespaces)
+                        if line.hasPrefix("["), line.hasSuffix("]") {
+                            close()
+                            section = String(line.dropFirst().dropLast())
+                        } else if let equals = line.firstIndex(of: "=") {
+                            fields[String(line[..<equals])] = String(line[line.index(after: equals)...])
+                        }
+                    }
+                    close()
+                }
+            }
+            return (names, install ?? marked)
+        }
     }
 
     static let known: [Source] = [
@@ -481,9 +653,9 @@ enum Mozilla {
     /// The other browser's bookmarks, every profile's run together; the merge
     /// on the way in leaves out anything already here, so profiles that share
     /// a page don't make two of it.
-    static func bookmarks(in source: Source) -> [Bookmark] {
+    static func bookmarks(in source: Source, profile: String? = nil) -> [Bookmark] {
         var out: [Bookmark] = []
-        for file in source.files {
+        for file in source.files(only: profile) {
             out += (try? bookmarkNodes(in: file)) ?? []
         }
         return out
@@ -576,7 +748,7 @@ enum Mozilla {
     /// The other browser's icons for the given pages, host by host, from
     /// favicons.sqlite beside places.sqlite: the largest bitmap it kept for
     /// the page, or failing that for the site's front door.
-    static func icons(in source: Source, for urls: [URL], limit: Int = 400) -> [String: Data] {
+    static func icons(in source: Source, profile: String? = nil, for urls: [URL], limit: Int = 400) -> [String: Data] {
         var out: [String: Data] = [:]
         var wanted: [(host: String, url: URL)] = []
         var seen = Set<String>()
@@ -587,7 +759,7 @@ enum Mozilla {
         }
         guard !wanted.isEmpty else { return out }
 
-        for file in source.files {
+        for file in source.files(only: profile) {
             let favicons = file.deletingLastPathComponent().appendingPathComponent("favicons.sqlite")
             guard FileManager.default.fileExists(atPath: favicons.path),
                   let copy = try? Snapshot(of: favicons)
@@ -632,9 +804,9 @@ enum Mozilla {
 
     /// The other browser's history — the same Place a Chromium browser gives,
     /// so the rest of the app can't tell them apart.
-    static func places(in source: Source, limit: Int = 3000) -> [Chromium.Place] {
+    static func places(in source: Source, profile: String? = nil, limit: Int = 3000) -> [Chromium.Place] {
         var out: [Chromium.Place] = []
-        for file in source.files {
+        for file in source.files(only: profile) {
             out += (try? placeRows(in: file, limit: limit)) ?? []
         }
         return Array(out.sorted { $0.last > $1.last }.prefix(limit))
@@ -691,14 +863,15 @@ enum Mozilla {
 
     /// The saved logins, and the sites the browser was told never to ask
     /// about, across every profile on this Mac.
-    static func read(_ source: Source) throws -> Chromium.Found {
+    static func read(_ source: Source, profile: String? = nil) throws -> Chromium.Found {
         var logins: [Login] = []
         var never: [String] = []
+        var skipped = 0
         var seen = Set<String>()
         var readAny = false
         var locked = false
 
-        for file in source.files {
+        for file in source.files(only: profile) {
             let profile = file.deletingLastPathComponent()
             let key4 = profile.appendingPathComponent("key4.db")
             let store = profile.appendingPathComponent("logins.json")
@@ -720,7 +893,10 @@ enum Mozilla {
             for entry in (doc["logins"] as? [[String: Any]]) ?? [] {
                 guard let origin = entry["hostname"] as? String else { continue }
                 let host = Vault.host(of: origin)
-                guard !host.isEmpty else { continue }
+                guard !host.isEmpty else {
+                    skipped += 1
+                    continue
+                }
                 guard let userB64 = entry["encryptedUsername"] as? String,
                       let passB64 = entry["encryptedPassword"] as? String,
                       let user = decryptLogin(userB64, master: key),
@@ -736,7 +912,34 @@ enum Mozilla {
         // nothing else to bring: a second, open profile still gives its own.
         if !readAny && locked { throw Trouble.primaryPassword }
         guard readAny else { throw Trouble.unreadable }
-        return Chromium.Found(logins: logins, never: never)
+        return Chromium.Found(logins: logins, never: never, skipped: skipped)
+    }
+
+    /// How much there is to bring, from the files alone, as Chromium's
+    /// preview counts it: bookmarks from the file, places up to the limit,
+    /// and the logins logins.json lists. key4.db is not opened, so a
+    /// primary password is only found out at the click.
+    static func preview(of source: Source, profile: String?, limit: Int = 3000) -> ImportSource.Preview {
+        var places = 0, passwords = 0
+        for file in source.files(only: profile) {
+            places += Chromium.count("""
+            SELECT COUNT(*) FROM moz_places WHERE hidden = 0 AND visit_count > 0 AND last_visit_date IS NOT NULL
+            AND (url LIKE 'http:%' OR url LIKE 'https:%')
+            """, in: file)
+            let folder = file.deletingLastPathComponent()
+            guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("key4.db").path),
+                  let data = try? Data(contentsOf: folder.appendingPathComponent("logins.json")),
+                  let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            passwords += ((doc["logins"] as? [[String: Any]]) ?? []).filter {
+                $0["hostname"] is String && ($0["encryptedPassword"] as? String)?.isEmpty == false
+            }.count
+        }
+        return ImportSource.Preview(
+            bookmarks: Bookmarks.count(bookmarks(in: source, profile: profile)),
+            places: min(limit, places),
+            passwords: passwords
+        )
     }
 
     /// The key that unlocks the logins, from key4.db: the empty primary
@@ -960,7 +1163,8 @@ enum Mozilla {
 /// One browser to bring things over from, whichever family it belongs to, so
 /// the welcome, the panels and the bench verb work in one vocabulary and
 /// Chrome and Firefox sit side by side without either knowing about the
-/// other.
+/// other. Everything that reads takes a profile: its folder's name, or nil
+/// for every profile at once.
 enum ImportSource: Identifiable, Hashable {
     case chromium(Chromium.Source)
     case mozilla(Mozilla.Source)
@@ -979,44 +1183,118 @@ enum ImportSource: Identifiable, Hashable {
         }
     }
 
-    var bookmarks: [Bookmark] {
+    func bookmarks(profile: String? = nil) -> [Bookmark] {
         switch self {
-        case .chromium(let s): return Chromium.bookmarks(in: s)
-        case .mozilla(let s): return Mozilla.bookmarks(in: s)
+        case .chromium(let s): return Chromium.bookmarks(in: s, profile: profile)
+        case .mozilla(let s): return Mozilla.bookmarks(in: s, profile: profile)
         }
     }
 
-    func places(limit: Int = 3000) -> [Chromium.Place] {
+    func places(profile: String? = nil, limit: Int = 3000) -> [Chromium.Place] {
         switch self {
-        case .chromium(let s): return Chromium.places(in: s, limit: limit)
-        case .mozilla(let s): return Mozilla.places(in: s, limit: limit)
+        case .chromium(let s): return Chromium.places(in: s, profile: profile, limit: limit)
+        case .mozilla(let s): return Mozilla.places(in: s, profile: profile, limit: limit)
         }
     }
 
-    func icons(for urls: [URL]) -> [String: Data] {
+    func icons(profile: String? = nil, for urls: [URL]) -> [String: Data] {
         switch self {
-        case .chromium(let s): return Chromium.icons(in: s, for: urls)
-        case .mozilla(let s): return Mozilla.icons(in: s, for: urls)
+        case .chromium(let s): return Chromium.icons(in: s, profile: profile, for: urls)
+        case .mozilla(let s): return Mozilla.icons(in: s, profile: profile, for: urls)
         }
     }
 
-    func read() throws -> Chromium.Found {
+    func read(profile: String? = nil) throws -> Chromium.Found {
         switch self {
-        case .chromium(let s): return try Chromium.read(s)
-        case .mozilla(let s): return try Mozilla.read(s)
+        case .chromium(let s): return try Chromium.read(s, profile: profile)
+        case .mozilla(let s): return try Mozilla.read(s, profile: profile)
         }
     }
 
-    /// The profiles behind it, by folder name — for the bench verb to report.
-    var profiles: [String] {
+    /// Whether its passwords are behind a key macOS asks about.
+    var asksForKey: Bool {
+        if case .chromium = self { return true }
+        return false
+    }
+
+    // MARK: - profiles
+
+    struct Profile: Identifiable, Hashable {
+        /// The folder's name, which is what the readers go by.
+        let id: String
+        /// What the browser calls it: "Work", "Person 1", or the folder's
+        /// own name when it says nothing.
+        let name: String
+    }
+
+    /// Every profile, by the name the browser gives it. A browser's own
+    /// Guest and System profiles aren't anybody's, and aren't offered.
+    var profiles: [Profile] {
         switch self {
-        case .chromium(let s): return s.profiles.map(\.lastPathComponent)
-        case .mozilla(let s): return s.files.map { $0.deletingLastPathComponent().lastPathComponent }
+        case .chromium(let s):
+            let names = s.localState.names
+            return s.profiles.map(\.lastPathComponent)
+                .filter { !["Guest Profile", "System Profile"].contains($0) }
+                .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+                .map { Profile(id: $0, name: names[$0] ?? ($0 == s.root.lastPathComponent ? s.name : $0)) }
+        case .mozilla(let s):
+            let names = s.ini.names
+            var seen = Set<String>()
+            return s.files.map { $0.deletingLastPathComponent().lastPathComponent }
+                .filter { seen.insert($0).inserted }
+                .map { Profile(id: $0, name: names[$0] ?? $0) }
+        }
+    }
+
+    /// The profile used most recently, which is the one brought in unless
+    /// another is chosen: what the browser itself says it used last, or
+    /// else the profile whose files changed last.
+    var usual: String? {
+        let ids = profiles.map(\.id)
+        switch self {
+        case .chromium(let s):
+            if let last = s.localState.last.first(where: ids.contains) { return last }
+            func touched(_ folder: URL) -> Date {
+                ["History", "Bookmarks", "Login Data"].compactMap {
+                    (try? folder.appendingPathComponent($0).resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                }.max() ?? .distantPast
+            }
+            return s.profiles.filter { ids.contains($0.lastPathComponent) }
+                .max { touched($0) < touched($1) }?.lastPathComponent
+        case .mozilla(let s):
+            if let usual = s.ini.usual, ids.contains(usual) { return usual }
+            // The files come newest first.
+            return ids.first
+        }
+    }
+
+    // MARK: - counting
+
+    /// What there is to bring, counted before anything is: never a key
+    /// asked for, never a password decrypted.
+    struct Preview: Equatable {
+        var bookmarks = 0
+        var places = 0
+        var passwords = 0
+        /// Chrome Web Store ids, for a Chromium browser.
+        var extensions: [String] = []
+    }
+
+    func preview(profile: String?) -> Preview {
+        switch self {
+        case .chromium(let s): return Chromium.preview(of: s, profile: profile)
+        case .mozilla(let s): return Mozilla.preview(of: s, profile: profile)
         }
     }
 
     static func installed() -> [ImportSource] {
         Chromium.installed().map(ImportSource.chromium) + Mozilla.installed().map(ImportSource.mozilla)
+    }
+
+    /// Whether Safari is on this Mac: its data is kept from other apps, so
+    /// the sheet says how to export it instead.
+    static var safari: Bool {
+        FileManager.default.fileExists(atPath: "/Applications/Safari.app")
     }
 }
 

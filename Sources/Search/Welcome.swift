@@ -224,25 +224,20 @@ struct WelcomePanel: View {
 
     private func bringAll() {
         guard let source = source ?? ImportSource.installed().first else { return }
+        // The profile used most recently, without asking: the sheet in
+        // Settings › Passwords is where another is chosen.
+        let profile = source.usual
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
         if wantsPasswords {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
-                let outcome = Result { try source.read() }
+                let outcome = Result { try source.read(profile: profile) }
                 DispatchQueue.main.async {
                     switch outcome {
                     case .success(let found):
-                        var kept = 0
-                        for login in found.logins
-                        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used, clear: login.clear) {
-                            kept += 1
-                        }
-                        var never = Vault.never
-                        found.never.forEach { never.insert($0) }
-                        Vault.never = never
-                        lines.append("\(kept) passwords")
+                        lines.append("\(browser.keep(found)) passwords")
                     case .failure(Chromium.Trouble.noPassphrase):
                         lines.append("passwords: macOS didn't hand over the key — allow it and try again")
                     case .failure(Mozilla.Trouble.primaryPassword):
@@ -255,11 +250,11 @@ struct WelcomePanel: View {
             }
         }
         if wantsBookmarks {
-            lines.append("\(browser.takeBookmarks(from: source)) bookmarks")
+            lines.append("\(browser.takeBookmarks(from: source, profile: profile).added) bookmarks")
         }
         if wantsHistory {
             group.enter()
-            browser.takePlaces(from: source) { count in
+            browser.takePlaces(from: source, profile: profile) { count in
                 lines.append("\(count) places")
                 group.leave()
             }
