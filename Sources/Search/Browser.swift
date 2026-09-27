@@ -6,6 +6,21 @@ import Combine
 // whether the address field is up. Small enough to read in one sitting, which
 // is the point of a browser with no features.
 
+/// What every window shares: the settings, History, bookmarks, the
+/// downloads list and the downloads under way, hidden elements, and the
+/// one floating video. Each window's Browser holds only its own tabs and
+/// what is drawn over them.
+@MainActor
+enum Shared {
+    static let prefs = Preferences()
+    static let bookmarks = Bookmarks()
+    static let history = History()
+    static let curtain = Curtain()
+    static let loot = Loot()
+    static let floater = Float()
+    static let fetches = Fetches()
+}
+
 @MainActor
 final class Browser: NSObject, ObservableObject {
     /// With groups on, every change to the row ends with it put back in the
@@ -55,7 +70,7 @@ final class Browser: NSObject, ObservableObject {
 
     /// Everything there is to set. Held here so the whole window redraws when
     /// one of them changes.
-    let prefs = Preferences()
+    let prefs = Shared.prefs
     let linkStatus = LinkStatus()
     /// The settings panel.
     @Published var tuning = false
@@ -64,7 +79,7 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - bookmarks
 
-    let bookmarks = Bookmarks()
+    let bookmarks = Shared.bookmarks
     /// The full list, for taking things out.
     @Published var bookmarking = false
     /// The dropdown off the button.
@@ -140,7 +155,7 @@ final class Browser: NSObject, ObservableObject {
     /// answers to this string.
     @Published var typed = "" { didSet { guess() } }
 
-    let history = History()
+    let history = Shared.history
     /// What the field is offering, best first.
     @Published private(set) var offers: [Suggestion] = []
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
@@ -215,9 +230,9 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - taking things off pages
 
-    let curtain = Curtain()
-    let loot = Loot()
-    let floater = Float()
+    let curtain = Shared.curtain
+    let loot = Shared.loot
+    let floater = Shared.floater
     /// True while the pointer is picking things to hide.
     @Published private(set) var veiling = false
     /// True while the list of what is hidden here is up.
@@ -798,7 +813,7 @@ final class Browser: NSObject, ObservableObject {
     /// the Finder, and it stays long enough to be clicked.
     @Published private(set) var announcedFile: URL?
     /// Downloads while they happen (see Fetching.swift).
-    let fetches = Fetches()
+    let fetches = Shared.fetches
 
     /// ⌘⇧C. The address, in the clipboard, and a line that says as much.
     func copyAddress() {
