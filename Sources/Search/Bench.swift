@@ -1055,6 +1055,29 @@ final class Bench {
                 }
             }
 
+        case "find":
+            // Find on Page as typed into its bar, then Next or Previous
+            // pressed, and what the bar says once the page has answered.
+            guard Store.testing else { answer(["error": "find only works on a --test run"]); return }
+            let start = Date()
+            browser.finding = true
+            browser.matchCase = request["case"] as? Bool ?? false
+            browser.wholeWords = request["words"] as? Bool ?? false
+            // The same words again would count as Next, as they do in the bar.
+            let text = request["text"] as? String ?? ""
+            if browser.needle != text { browser.needle = text }
+            for _ in 0..<(request["next"] as? Int ?? 0) { browser.look(forward: true) }
+            for _ in 0..<(request["back"] as? Int ?? 0) { browser.look(forward: false) }
+            func settled(_ tries: Int) {
+                let status = browser.findStatus
+                if (status != nil && !browser.findBusy) || tries > 200 {
+                    answer(["status": status ?? "", "ms": Int(Date().timeIntervalSince(start) * 1000)])
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { settled(tries + 1) }
+            }
+            settled(0)
+
         case "accounts":
             // The list under the sign-in box the caret is in — passkeys, then
             // passwords — and, with "pick", a click on its row by number,
@@ -1980,7 +2003,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find",
             ]])
         }
     }

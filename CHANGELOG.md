@@ -14,6 +14,7 @@ in [ROADMAP.md](ROADMAP.md).
 ### Added
 
 - Passkeys under the sign-in field, as in Safari: on a site that offers them there (GitHub, Google and others), the passkeys this Mac holds for it show first in the list under the name box, beside the saved passwords, and a click on one brings up the Mac's sheet for that passkey and signs you in. Nothing reaches the site until you pick one; a site in a frame is offered none. Thanks [@RayBytes](https://github.com/RayBytes) for asking ([#17](https://github.com/driceroland/Search/issues/17))
+- Find on Page says where you are, as in “3 of 17”, and goes round from the last match to the first. Its menu can match case or whole words only. Without Match case, a letter typed without its accent also finds it with one, as before: “ete” finds “été”. On a very long page the count stops at 1000 and shows “1000+” until Next goes further, as Safari's does. PDFs say whether there is a match, without a count. Thanks [@lulkebit](https://github.com/lulkebit) ([#377](https://github.com/driceroland/Search/pull/377))
 
 ### Fixed
 
