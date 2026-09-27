@@ -3468,9 +3468,9 @@ extension Browser: WKDownloadDelegate {
     /// holds its script until `done`, and draws the pages meanwhile. Only the
     /// tab in front of the window you are in may ask, one sheet at a time: a
     /// tab behind, or another window's, is answered with nothing, as Safari
-    /// does. And a page that asks again each time the sheet is cancelled
-    /// is left alone after the second cancel within ten seconds, until it
-    /// is another page (see PrintSheet).
+    /// does. And a site that asks again each time the sheet is cancelled
+    /// asks no more after the second cancel within ten seconds, until the
+    /// tab goes to another site (see PrintSheet).
     @objc(_webView:printFrame:pdfFirstPageSize:completionHandler:)
     func webView(
         _ webView: WKWebView,
@@ -3545,33 +3545,47 @@ extension Browser: WKDownloadDelegate {
 final class PrintSheet: NSObject {
     private let done: () -> Void
     private let tab: Tab.ID
-    private let page: URL?
+    private let site: String?
 
     init(_ tab: Tab, _ done: @escaping () -> Void) {
         self.tab = tab.id
-        self.page = tab.committed
+        self.site = PrintSheet.site(of: tab)
         self.done = done
     }
 
-    /// The sheets a page's print() had cancelled, by tab, on the page it
-    /// was then: another page starts afresh.
-    private static var cancelled: [Tab.ID: (page: URL?, when: [Date])] = [:]
+    /// The sheets a page's print() had cancelled, by tab, on the site it
+    /// was on: its origin, not its address, which the page itself can
+    /// change with history.pushState between two print()s. Two cancels
+    /// within ten seconds and the site asks no more, until the tab goes to
+    /// another site or closes.
+    private struct Cancels {
+        var site: String?
+        var when: [Date] = []
+        var blocked = false
+    }
+    private static var cancelled: [Tab.ID: Cancels] = [:]
 
-    /// Whether this tab's page may bring the sheet up again: not after two
-    /// cancelled within ten seconds, which is a page asking in a loop.
+    private static func site(of tab: Tab) -> String? {
+        guard let page = tab.committed else { return nil }
+        return "\(page.scheme ?? "")://\(page.host() ?? ""):\(page.port.map(String.init) ?? "")"
+    }
+
+    /// Whether this tab's site may bring the sheet up again.
     static func allows(_ tab: Tab) -> Bool {
-        guard let seen = cancelled[tab.id], seen.page == tab.committed else {
+        guard let seen = cancelled[tab.id], seen.site == site(of: tab) else {
             cancelled[tab.id] = nil
             return true
         }
-        return seen.when.filter { Date().timeIntervalSince($0) < 10 }.count < 2
+        return !seen.blocked
     }
 
     @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         if let contextInfo { Unmanaged<PrintSheet>.fromOpaque(contextInfo).release() }
         if !success {
-            var seen: (page: URL?, when: [Date]) = PrintSheet.cancelled[tab].flatMap { $0.page == page ? $0 : nil } ?? (page, [])
-            seen.when.append(Date())
+            var seen = PrintSheet.cancelled[tab].flatMap { $0.site == site ? $0 : nil } ?? Cancels(site: site)
+            let now = Date()
+            seen.when = seen.when.filter { now.timeIntervalSince($0) < 10 } + [now]
+            if seen.when.count >= 2 { seen.blocked = true }
             PrintSheet.cancelled[tab] = seen
         }
         done()
