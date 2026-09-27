@@ -300,6 +300,11 @@ final class Tab: ObservableObject, Identifiable {
     /// The letter a pinned tab is reduced to, and what a tab shows in place of
     /// an icon it doesn't have yet.
     var monogram: String {
+        // A file on this Mac has no host: its name's first letter.
+        if let address, address.isFileURL {
+            let name = address.lastPathComponent.trimmingCharacters(in: CharacterSet(charactersIn: "/."))
+            return name.first.map { String($0).uppercased() } ?? "•"
+        }
         let host = address?.host()?.replacingOccurrences(of: "www.", with: "") ?? ""
         return host.first.map { String($0).uppercased() } ?? "•"
     }
@@ -1062,8 +1067,9 @@ final class Tab: ObservableObject, Identifiable {
         }
         // A tab that slept has its own history to go back to — the page, its
         // back list and its scroll position, in one. Anything else starts
-        // from the address.
-        if let state {
+        // from the address. A file does too: its history comes back without
+        // the folder it may read, and showed nothing.
+        if let state, !url.isFileURL {
             view.interactionState = state
         } else {
             view.open(url)
@@ -1175,7 +1181,8 @@ final class Tab: ObservableObject, Identifiable {
         // the reload.
         guard !wake() else { return }
         reader = false
-        if hollow, let address {
+        // A file is read again with the folder it may read (see open).
+        if let address, hollow || address.isFileURL {
             web.open(address)
         } else if fromOrigin {
             web.reloadFromOrigin()
@@ -1820,7 +1827,14 @@ extension WKWebView {
     /// Mac's browser, opened a tab that stayed empty.
     func open(_ url: URL) {
         if url.isFileURL {
-            loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+            // Its folder, for the pictures and styles beside it — unless the
+            // folder is the home folder, the disk or a volume, where the
+            // file alone is what was opened.
+            let folder = url.deletingLastPathComponent().standardizedFileURL
+            let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+            let tooWide = folder == home || ["/", "/Users", "/Volumes"].contains(folder.path)
+                || folder.deletingLastPathComponent().path == "/Volumes"
+            loadFileURL(url, allowingReadAccessTo: tooWide ? url : folder)
         } else {
             load(URLRequest(url: url))
         }
