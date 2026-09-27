@@ -132,6 +132,8 @@ struct TabBar: View {
                     // Back, forward, reload, and the bookmarks, at the far end
                     // of the row. The dropdown hangs from the last one.
                     HStack(spacing: Metrics.tabGap) {
+                        // Only while a download is running, and a moment after.
+                        FetchDoor(browser: browser, fetches: browser.fetches)
                         ExtensionSlot()
                         if !browser.prefs.navigationLeft {
                             Helm(browser: browser).padding(.trailing, 8)

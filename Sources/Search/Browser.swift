@@ -694,6 +694,11 @@ final class Browser: NSObject, ObservableObject {
 
     /// A line that rises from the bottom, says one thing, and leaves.
     @Published private(set) var announcement: String?
+    /// The file a "Saved …" line is about: clicked, the line shows it in
+    /// the Finder, and it stays long enough to be clicked.
+    @Published private(set) var announcedFile: URL?
+    /// Downloads while they happen (see Fetching.swift).
+    let fetches = Fetches()
 
     /// ⌘⇧C. The address, in the clipboard, and a line that says as much.
     func copyAddress() {
@@ -718,12 +723,16 @@ final class Browser: NSObject, ObservableObject {
         announce("Link copied")
     }
 
-    func announce(_ text: String) {
+    func announce(_ text: String, file: URL? = nil) {
         announcement = text
+        announcedFile = file
         hush?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.announcement = nil }
+        let work = DispatchWorkItem { [weak self] in
+            self?.announcement = nil
+            self?.announcedFile = nil
+        }
         hush = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + (file == nil ? 1.7 : 4), execute: work)
     }
 
     /// The names extensions asked their downloads to be saved under.
@@ -2331,6 +2340,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     func keep(_ download: WKDownload) {
         download.delegate = self
         downloading.append(download)
+        fetches.start(download)
         // Noted now, while its page is still there to ask: a private tab's
         // download is saved where you say, and left out of the list.
         if let web = download.webView, tab(for: web)?.shy == true { unlisted.insert(ObjectIdentifier(download)) }
@@ -2508,11 +2518,15 @@ extension Browser: WKDownloadDelegate {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
         let file = whereToSave(asked ?? suggestedFilename)
         completionHandler(file)
-        if let file { announce("Downloading \(file.lastPathComponent)") }
+        if let file {
+            fetches.going(download, to: file)
+            announce("Downloading \(file.lastPathComponent)")
+        }
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         downloading.removeAll { $0 === download }
+        fetches.finish(download, file: download.progress.fileURL)
         let listed = unlisted.remove(ObjectIdentifier(download)) == nil
         guard let file = download.progress.fileURL else {
             announce("Download finished")
@@ -2568,7 +2582,7 @@ extension Browser: WKDownloadDelegate {
 
     private func saved(_ file: URL, from source: URL?) {
         loot.add(Keep(name: file.lastPathComponent, from: source?.host() ?? "", path: file.path, date: Date()))
-        announce("Saved \(file.lastPathComponent)")
+        announce("Saved \(file.lastPathComponent)", file: file)
     }
 
     func download(
@@ -2578,6 +2592,7 @@ extension Browser: WKDownloadDelegate {
     ) {
         downloading.removeAll { $0 === download }
         unlisted.remove(ObjectIdentifier(download))
+        fetches.fail(download)
         announce("Download failed")
     }
 

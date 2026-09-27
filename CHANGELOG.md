@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Downloads show while they happen: a small circle beside the other buttons fills as a file comes, turns into an arrow once it is in, and opens Downloads when clicked; it is there only while something downloads and a moment after. The file shows its progress in the Finder and on the Dock's Downloads stack, as Safari's do, and the "Saved" line at the bottom shows it in the Finder when clicked.
 - Three switches are on from now on: Show where links go, Peek at a link with a shift-click, and Flick the floating video to a corner. Correct spelling as you type follows the Mac's own setting rather than starting off. A switch you already turned off stays off.
 - Passkeys can unlock what a site encrypted with them: the WebAuthn PRF extension now reaches the passkey and its result comes back to the page, where it was dropped and sites that derive a key from your passkey said it wasn't supported. macOS 15 or later. ([#312](https://github.com/driceroland/Search/issues/312)) Thanks [@arvakme](https://github.com/arvakme) ([#313](https://github.com/driceroland/Search/pull/313))
 - Links from other apps can open in a small window of their own: the page, the site and Open in Search (⌘O), which moves it into your tabs as it is, after the pins and without loading it again. Escape or ⌘W closes it. Off unless you turn it on in Settings › General › Open links from other apps in a small window. The idea came from [@K-NRS](https://github.com/K-NRS) ([#227](https://github.com/driceroland/Search/pull/227)), after Arc's Little Arc.
