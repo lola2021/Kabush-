@@ -274,12 +274,14 @@ struct SideBar: View {
         let displayed = browser.displayedTabs
         let pins = displayed.filter { $0.pin != nil }.count
         let pinBlock = pins == 0 ? 0 : (pinCells(pins).map(\.maxY).max() ?? 0) + 10
-        let count = prefs.usesTabGroups
-            ? displayed.filter { $0.pin == nil && browser.group(of: $0) == nil }.count
-                + browser.tabGroups.reduce(0) { $0 + browser.visibleTabs(in: $1).count }
-            : displayed.count - pins
+        let rows = prefs.usesTabGroups
+            ? displayed.filter { $0.pin == nil && browser.group(of: $0) == nil }
+                + browser.tabGroups.flatMap { browser.visibleTabs(in: $0) }
+            : displayed.filter { $0.pin == nil }
+        // A pair is two lines (see SplitTabItem).
+        let pairs = rows.filter { browser.split(for: $0) != nil }.count
         let headings = prefs.usesTabGroups ? CGFloat(browser.tabGroups.count) * (GroupHeading.height + SideBar.gap) : 0
-        let loose = CGFloat(count) * (SideBar.row + SideBar.gap) + headings
+        let loose = CGFloat(rows.count) * (SideBar.row + SideBar.gap) + CGFloat(pairs) * SideBar.row + headings
         return Metrics.strip + pinBlock + loose + SideBar.row + 8
     }
 
@@ -299,7 +301,7 @@ struct SideBar: View {
                          width: nil, height: SideBar.row,
                          live: activeID.map { pair.contains($0) } ?? false,
                          focusedID: activeID,
-                         interactive: interactive)
+                         interactive: interactive, pill: pill)
                 .frame(maxWidth: .infinity)
         } else {
             SideRow(browser: browser, prefs: prefs, tab: tab,

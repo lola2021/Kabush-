@@ -300,7 +300,7 @@ struct TabBar: View {
                          width: displayedWidth, height: height,
                          live: activeID.map { pair.contains($0) } ?? false,
                          focusedID: activeID,
-                         interactive: interactive)
+                         interactive: interactive, pill: pill)
         } else {
             TabPill(browser: browser, prefs: browser.prefs, tab: tab,
                     live: tab.id == activeID, width: width, room: room, pill: pill,

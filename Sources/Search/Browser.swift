@@ -64,6 +64,16 @@ final class Browser: NSObject, ObservableObject {
                 splits[index].focused = id
             }
             // The switcher's order and pictures, most recently used first.
+            // Focus moving within a pair isn't leaving it; a pair left is
+            // one entry, under its first page.
+            if prefs.splitView, let pair = splits.first(where: { $0.contains(old) }) {
+                if let id = activeID, pair.contains(id) { return }
+                tabSwitcher.cancel()
+                if let first = tabs.first(where: { $0.id == pair.left }) {
+                    tabSwitcher.left(first, alive: Set((tabs + parkedTabs).map(\.id)))
+                }
+                return
+            }
             tabSwitcher.cancel()
             if let left { tabSwitcher.left(left, alive: Set((tabs + parkedTabs).map(\.id))) }
         }
@@ -2663,28 +2673,38 @@ final class Browser: NSObject, ObservableObject {
               let here = tabs.firstIndex(where: { $0.id == anchor }) else { return }
         for n in 1..<tabs.count {
             let next = tabs[((here + direction * n) % tabs.count + tabs.count) % tabs.count]
-            if shown.contains(next.id) { select(next); return }
+            if shown.contains(next.id) { select(entry(next)); return }
         }
+    }
+
+    /// Where a key that picks a place in the row lands: a pair's page that
+    /// had the keys last, not always its first.
+    private func entry(_ tab: Tab) -> Tab {
+        guard let pair = split(for: tab), pair.left == tab.id, let id = pair.focused,
+              let focused = tabs.first(where: { $0.id == id }) else { return tab }
+        return focused
     }
 
     /// ⌘1–8: the tab in that place on screen.
     func select(index: Int) {
         let shown = shownTabs
         guard shown.indices.contains(index) else { return }
-        select(shown[index])
+        select(entry(shown[index]))
     }
 
     /// ⌃Tab with the switcher on: the space's tabs, the most recently used
     /// first. Nothing changes until ⌃ is let go of (`commitTabSwitch`).
     func switchTabs(backwards: Bool) {
         guard let activeID else { return }
-        tabSwitcher.step(row: tabs.map(\.id), current: activeID, backwards: backwards)
+        // A pair once, under its first page.
+        tabSwitcher.step(row: tabs.filter(standsInRow).map(\.id), current: activeSplit?.left ?? activeID,
+                         backwards: backwards)
     }
 
     func commitTabSwitch(picking id: Tab.ID? = nil) {
         guard let target = tabSwitcher.finish(picking: id),
               let tab = tabs.first(where: { $0.id == target }) else { return }
-        select(tab)
+        select(entry(tab))
     }
 
     /// A link opened from a page lands next to the page it came from, not at
