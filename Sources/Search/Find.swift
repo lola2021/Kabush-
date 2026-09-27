@@ -4,8 +4,15 @@ import SwiftUI
 /// hairline as everything else that floats, and gone the moment it isn't wanted.
 struct FindBar: View {
     @ObservedObject var browser: Browser
+    var availableWidth: CGFloat? = nil
 
     @FocusState private var focused: Bool
+
+    private var narrow: Bool { availableWidth.map { $0 < 290 } ?? false }
+    private var fieldWidth: CGFloat {
+        guard let availableWidth else { return 160 }
+        return max(40, min(160, availableWidth - (narrow ? 80 : 130)))
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -23,7 +30,7 @@ struct FindBar: View {
                     .onSubmit { browser.look(forward: true) }
             }
             .font(.system(size: 12.5))
-            .frame(width: 150)
+            .frame(width: fieldWidth)
 
             // "3 of 17", as the page counted it.
             if let status = browser.findStatus {
@@ -37,11 +44,14 @@ struct FindBar: View {
                     .accessibilityIdentifier("Find result status")
             }
 
-            step("chevron.up", label: "Previous match", help: "Find the previous match.") {
-                browser.look(forward: false)
-            }
-            step("chevron.down", label: "Next match", help: "Find the next match.") {
-                browser.look(forward: true)
+            // A pane too narrow for them keeps Return and ⇧Return instead.
+            if !narrow {
+                step("chevron.up", label: "Previous match", help: "Find the previous match.") {
+                    browser.look(forward: false)
+                }
+                step("chevron.down", label: "Next match", help: "Find the next match.") {
+                    browser.look(forward: true)
+                }
             }
 
             Menu {
@@ -68,8 +78,8 @@ struct FindBar: View {
                 browser.closeFind()
             }
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
+        .padding(.leading, narrow ? 10 : 16)
+        .padding(.trailing, narrow ? 6 : 8)
         .padding(.vertical, 8)
         .background(Palette.ground, in: Capsule())
         .overlay(

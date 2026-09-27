@@ -183,6 +183,18 @@ struct Command: Identifiable {
         Command("tabs.search", "Search Tabs…", .tabs, KeyCombo("k")) { browser in
             if browser.editing, !browser.offers.isEmpty { browser.stepSummon() } else { browser.summon() }
         },
+        Command("tabs.split", "Split Current Page", .tabs, KeyCombo("s", control: true)) { browser in
+            guard browser.prefs.splitView else { return }
+            browser.startSplit()
+        },
+        Command("tabs.focusOtherPane", "Focus Other Pane", .tabs, KeyCombo("right", control: true)) { browser in
+            guard browser.prefs.splitView else { return }
+            browser.focusOtherPane()
+        },
+        Command("tabs.separateSplit", "Separate Split Tabs", .tabs, nil) { browser in
+            guard browser.prefs.splitView, let tab = browser.active else { return }
+            browser.detachSplit(tab)
+        },
         Command("tabs.rename", "Rename Tab", .tabs, nil) { browser in
             if let tab = browser.active { browser.beginTabRename(tab) }
         },
@@ -399,4 +411,10 @@ extension View {
     func shortcut(_ id: String) -> some View {
         keyboardShortcut(ShortcutStore.shared.key(for: id)?.swiftUI)
     }
+}
+
+extension Command {
+    /// Split View's commands: with it off, not listed, and their keys go on
+    /// to the page.
+    static let split: Set<String> = ["tabs.split", "tabs.focusOtherPane", "tabs.separateSplit"]
 }
