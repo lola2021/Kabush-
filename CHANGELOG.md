@@ -47,6 +47,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- A middle-click opens a link in a new tab on pages that stop the click on its way up, where it opened nothing; a page that takes the middle-click for itself still keeps it, as in Chrome.
 - Updates can only come from Office Commun: the file that names each new version is now signed with the same Developer ID as the app, and a version it names is fetched only if that signature holds up. When the app can't replace itself and offers the disk image, Search downloads it itself and opens it only if its hash is the signed one and its signature is Office Commun's.
 - With the caret in a sign-in box, scrolling no longer asks the keychain for your accounts on every frame, nor redraws the window each time: the accounts are looked up once per box, and the list only moves with it. The list also takes a click again while the page scrolls; each frame had started its half-second guard over.
 - A tab still loading no longer costs a fifth of a core for as long as it loads. Its spinning ring was redrawing the whole window every frame; a page like Reddit's never finishes loading, so one of those open anywhere kept Search busy the whole time, even in the background. Thanks [@AxxzyWasTaken](https://github.com/AxxzyWasTaken) ([#269](https://github.com/driceroland/Search/pull/269), [#268](https://github.com/driceroland/Search/issues/268))

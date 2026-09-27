@@ -68,6 +68,7 @@
                                        folder (open: its first bookmark picked)
     ./bench bookmark URL [new]         test run: a bookmark picked from the list, timed until it loads
                                        (new: into a new tab, whose page isn't built yet)
+    ./bench middle ID X Y              test run: the middle button clicked at X Y of a tab's page
     ./bench pin ID [off|home]          test run: pin a tab, unpin it, or double-click it (home)
     ./bench fill [STEPS]               test run: the page reporting its scroll STEPS times, each timed until the window rests
     ./bench peek URL|close             test run: the peek panel over the tab in front, as a shift-click opens it
@@ -286,6 +287,9 @@ def main(argv):
     elif verb == "keyeq":
         if len(args) < 2 or any(a != "shift" for a in args[2:]): sys.exit("usage: bench keyeq CHARS CODE [shift]")
         request["chars"], request["code"], request["mods"] = args[0], int(args[1]), args[2:]
+    elif verb == "middle":
+        if len(args) != 3: sys.exit("usage: bench middle ID X Y")
+        request["id"], request["x"], request["y"] = args[0], float(args[1]), float(args[2])
     elif verb == "pin":
         if len(args) not in (1, 2) or args[1:] not in ([], ["off"], ["home"]): sys.exit("usage: bench pin ID [off|home]")
         request["id"] = args[0]
