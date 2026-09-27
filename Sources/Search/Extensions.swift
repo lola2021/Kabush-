@@ -251,6 +251,15 @@ final class Extensions: NSObject, ObservableObject {
             for pattern in found.allRequestedMatchPatterns {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
+            // Other extensions' pages are never among "all sites": with
+            // chrome-extension registered as a scheme, WebKit counts them in
+            // <all_urls>, which Chrome doesn't. Refused outright, which WebKit
+            // puts before any grant; its own pages stay its own.
+            for scheme in Set([Extensions.scheme, Extensions.formerScheme, "webkit-extension"]) {
+                if let pages = try? WKWebExtension.MatchPattern(string: "\(scheme)://*/*") {
+                    context.setPermissionStatus(.deniedExplicitly, for: pages)
+                }
+            }
             try controller.load(context)
             watch(context)
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
