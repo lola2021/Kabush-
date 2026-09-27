@@ -727,6 +727,21 @@ enum ExtensionShims {
       let listening = false;
       const join = () => { if (channel && !background && !listening) { listening = true; channel.postMessage({ hello: true, from: me, where: location.pathname }); } };
       const leave = () => { if (channel && !background && listening) { listening = false; channel.postMessage({ bye: true, from: me }); } };
+      // Who sent a message from the extension's popup, as Chrome says it:
+      // no tab. WebKit only carries a page's messages when it can name the
+      // tab the page is in, so the popup is one (see PopupPage) — a tab at
+      // no place in the window's row (its index comes as NaN), its own
+      // page at the top. Passbolt's worker takes a port that comes with a
+      // tab for one of its frames in a website, and turned its popup's
+      // away: the popup stayed empty.
+      const untabbed = (sender) => {
+        const tab = sender && sender.tab;
+        if (!tab || tab.index >= 0 || sender.frameId || tab.url !== sender.url
+          || !runtime || !String(sender.url).startsWith(runtime.getURL(""))) return sender;
+        const plain = { ...sender };
+        delete plain.tab;
+        return plain;
+      };
       const gather = (event, told) => {
         if (!event || typeof event.addListener !== "function") return;
         const add = event.addListener.bind(event);
@@ -790,6 +805,7 @@ enum ExtensionShims {
               .then((value) => sendResponse({ value }), (e) => sendResponse({ error: String(e && e.message || e) }));
             return true;
           }
+          sender = untabbed(sender);
           for (const listener of [...listeners]) {
             let result;
             try { result = listener(message, sender, sendResponse); } catch (e) { setTimeout(() => { throw e; }); continue; }
@@ -1066,7 +1082,10 @@ enum ExtensionShims {
       define("offscreen", ["createDocument", "closeDocument", "hasDocument"], [],
         { Reason: new Proxy({}, { get: (_, key) => String(key) }) });
       define("tabGroups", ["get", "query", "update", "move"],
-        ["onCreated", "onRemoved", "onUpdated", "onMoved"], { TAB_GROUP_ID_NONE: -1 });
+        ["onCreated", "onRemoved", "onUpdated", "onMoved"], { TAB_GROUP_ID_NONE: -1,
+          // Read as the worker starts: Claude's lists its colours in a class.
+          Color: { GREY: "grey", BLUE: "blue", RED: "red", YELLOW: "yellow", GREEN: "green",
+            PINK: "pink", PURPLE: "purple", CYAN: "cyan", ORANGE: "orange" } });
       define("fontSettings",
         ["getFontList", "getFont", "setFont", "clearFont", "getDefaultFontSize", "setDefaultFontSize",
          "clearDefaultFontSize", "getDefaultFixedFontSize", "setDefaultFixedFontSize", "clearDefaultFixedFontSize",
@@ -1975,7 +1994,23 @@ enum ExtensionShims {
         put(onConnect, "addListener", (listener, ...rest) => {
           if (typeof listener !== "function") return add.call(onConnect, listener, ...rest);
           let w = wrapped.get(listener);
-          if (!w) { w = (port) => listener(fromOwn(port) ? number(port) : port); wrapped.set(listener, w); }
+          if (!w) {
+            w = (port) => {
+              const given = port && port.sender, sender = untabbed(given);
+              port = fromOwn(port) ? number(port) : port;
+              // WebKit makes a port's sender afresh at each look, over
+              // anything set on the port: the port is seen through a proxy.
+              if (sender !== given) {
+                port = new Proxy(port, { get: (target, key) => {
+                  if (key === "sender") return sender;
+                  const value = target[key];
+                  return typeof value === "function" ? value.bind(target) : value;
+                } });
+              }
+              return listener(port);
+            };
+            wrapped.set(listener, w);
+          }
           return add.call(onConnect, w, ...rest);
         });
         put(onConnect, "removeListener", (listener) => remove.call(onConnect, wrapped.get(listener) || listener));
@@ -2770,7 +2805,8 @@ enum ExtensionShims {
                   let configuration = context.webViewConfiguration
             else { throw Unsupported(what: "No page for the offscreen document") }
             let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
-            page.load(URLRequest(url: context.baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))))
+            guard let url = ExtensionShims.page(path, in: context) else { throw Unsupported(what: "No page for the offscreen document") }
+            page.load(URLRequest(url: url))
             offscreen[id] = page
             // Answered once the page has loaded, as Chrome does: the worker's
             // next line is a message to it, and a page still loading has no
@@ -3310,9 +3346,25 @@ enum ExtensionShims {
         (context.webExtension.manifest["side_panel"] as? [String: Any])?["default_path"] as? String
     }
 
+    /// One of the extension's own pages, from the path it gave: resolved
+    /// rather than appended, since a path can carry a query (Claude's side
+    /// panel names its tab, sidepanel.html?tabId=…), which appended would be
+    /// escaped into the file's name. Never anywhere but inside the
+    /// extension: a full address given as a "path" is refused.
+    static func page(_ path: String, in context: WKWebExtensionContext) -> URL? {
+        let base = context.baseURL
+        guard let url = URL(string: path.trimmingCharacters(in: CharacterSet(charactersIn: "/")), relativeTo: base)?.absoluteURL,
+              url.scheme == base.scheme, url.host == base.host
+        else { return nil }
+        return url
+    }
+
     static func openPanel(_ context: WKWebExtensionContext, owner: Extensions) {
         guard let path = panelPath[context.uniqueIdentifier] ?? defaultPanel(context) else { return }
-        let url = context.baseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))
+        // Resolved, not appended: a path can carry a query — Claude's names
+        // the tab its panel is for, sidepanel.html?tabId=… — which appended
+        // would be escaped into the file's name.
+        guard let url = ExtensionShims.page(path, in: context) else { return }
         owner.browser?.open(url, foreground: true)
     }
 
