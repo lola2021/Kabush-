@@ -340,6 +340,8 @@ final class Extensions: NSObject, ObservableObject {
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
             loadsThisRun.insert(item.id)
             contexts[item.id] = context
+            // Keys you gave its commands in Settings › Shortcuts (#189).
+            ShortcutStore.shared.adopt(context, id: item.id)
             actionsChanged += 1
             return true
         } catch {

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import WebKit
 
 // Your own keys for the menu commands (Settings › Shortcuts). Only what you
 // change is kept, on top of the keys the menus already have, so a browser
@@ -208,6 +209,9 @@ final class ShortcutStore: ObservableObject {
     @Published private var changed: [String: Override]
     /// A key is being typed into Settings; the app's own keys stand aside.
     @Published var recording = false
+    /// The key each extension command came with, as its extension loaded
+    /// (see `adopt`), by its id here: "ext:" + extension + ":" + command.
+    private var manifest: [String: Override] = [:]
 
     private init() {
         changed = Store.settings.data(forKey: "shortcuts")
@@ -216,7 +220,11 @@ final class ShortcutStore: ObservableObject {
 
     func key(for id: String) -> KeyCombo? {
         if let override = changed[id] { return override.key }
-        return Command.named(id)?.defaultKey
+        return defaultKey(for: id)
+    }
+
+    private func defaultKey(for id: String) -> KeyCombo? {
+        id.hasPrefix("ext:") ? manifest[id]?.key : Command.named(id)?.defaultKey
     }
 
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
@@ -233,9 +241,17 @@ final class ShortcutStore: ObservableObject {
             && !Command.all.contains { key(for: $0.id) == combo }
     }
 
-    /// The command already on `combo`, other than `id`.
-    func owner(of combo: KeyCombo, except id: String) -> Command? {
-        Command.all.first { $0.id != id && key(for: $0.id) == combo }
+    /// The command already on `combo`, other than `id`: one of Search's,
+    /// or an extension's.
+    func owner(of combo: KeyCombo, except id: String) -> (id: String, title: String)? {
+        if let command = Command.all.first(where: { $0.id != id && key(for: $0.id) == combo }) {
+            return (command.id, command.title)
+        }
+        if #available(macOS 15.4, *),
+           let other = extensionCommands().first(where: { $0.id != id && key(for: $0.id) == combo }) {
+            return (other.id, other.command.title)
+        }
+        return nil
     }
 
     /// `combo` for `id`, taken from whichever command had it.
@@ -249,17 +265,30 @@ final class ShortcutStore: ObservableObject {
     func reset(_ id: String) {
         changed[id] = nil
         save()
+        applied(id)
     }
 
     func resetAll() {
+        let was = changed.keys
         changed = [:]
         save()
+        was.forEach(applied)
     }
 
     /// Only a difference from the default is kept.
     private func set(_ combo: KeyCombo?, for id: String) {
-        changed[id] = combo == Command.named(id)?.defaultKey ? nil : Override(key: combo)
+        changed[id] = combo == defaultKey(for: id) ? nil : Override(key: combo)
         save()
+        applied(id)
+    }
+
+    /// An extension command's key, handed to WebKit, which matches it.
+    private func applied(_ id: String) {
+        guard id.hasPrefix("ext:"), #available(macOS 15.4, *),
+              let command = extensionCommands().first(where: { $0.id == id })?.command else { return }
+        let combo = key(for: id)
+        command.activationKey = combo?.key
+        command.modifierFlags = combo?.flags ?? []
     }
 
     private func save() {
@@ -268,6 +297,57 @@ final class ShortcutStore: ObservableObject {
         } else {
             Store.settings.set(try? JSONEncoder().encode(changed), forKey: "shortcuts")
         }
+    }
+}
+
+// Extension commands, #189: the keys an extension's manifest asks for, set
+// otherwise here as WebKit means them to be — it matches the key it is
+// given, and the app keeps it. Only single keys, as a manifest has them.
+
+@available(macOS 15.4, *)
+extension ShortcutStore {
+    struct ExtensionCommand {
+        let id: String
+        let extensionName: String
+        let command: WKWebExtension.Command
+    }
+
+    /// The commands of every extension loaded, with a name to show.
+    func extensionCommands() -> [ExtensionCommand] {
+        let names = Dictionary(Extensions.shared.installed.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
+        return Extensions.shared.contexts.sorted { $0.key < $1.key }.flatMap { ext, context in
+            context.commands.map {
+                ExtensionCommand(id: "ext:\(ext):\($0.id)", extensionName: names[ext] ?? ext, command: $0)
+            }
+        }
+    }
+
+    /// An extension just loaded: the keys it came with noted, and yours
+    /// put in their place.
+    func adopt(_ context: WKWebExtensionContext, id ext: String) {
+        for command in context.commands {
+            let id = "ext:\(ext):\(command.id)"
+            manifest[id] = Override(key: KeyCombo(activation: command.activationKey, flags: command.modifierFlags))
+            if changed[id] != nil { applied(id) }
+        }
+    }
+}
+
+extension KeyCombo {
+    /// An extension command's key, as WebKit holds it.
+    init?(activation key: String?, flags: NSEvent.ModifierFlags) {
+        guard let key, !key.isEmpty else { return nil }
+        self.init(key, command: flags.contains(.command), shift: flags.contains(.shift),
+                  option: flags.contains(.option), control: flags.contains(.control))
+    }
+
+    var flags: NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if command { flags.insert(.command) }
+        if shift { flags.insert(.shift) }
+        if option { flags.insert(.option) }
+        if control { flags.insert(.control) }
+        return flags
     }
 }
 
