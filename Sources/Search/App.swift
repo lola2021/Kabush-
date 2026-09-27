@@ -188,6 +188,8 @@ struct SearchApp: App {
                     .keyboardShortcut(.delete, modifiers: [.command, .shift])
                 Button("Clear History") { browser.clearHistory() }
             }
+            // Search › Check for Updates…, under About, as in any Mac app.
+            CommandGroup(after: .appInfo) { UpdateMenuItem() }
             CommandGroup(after: .appSettings) {
                 Button("Settings…") { browser.tuning = true }
                     .keyboardShortcut(",")
@@ -1073,5 +1075,20 @@ struct ContentView: View {
             return false
         }
         return true
+    }
+}
+
+/// Check for Updates…, or Restart to Update once a newer build is in place.
+/// Its own view, so only the updater's changes redraw it (see SearchApp.body).
+private struct UpdateMenuItem: View {
+    @ObservedObject private var updater = Updater.shared
+
+    var body: some View {
+        if case .ready = updater.stage {
+            Button("Restart to Update") { updater.relaunch() }
+        } else {
+            Button("Check for Updates…") { updater.checkByHand() }
+                .disabled(updater.checking)
+        }
     }
 }

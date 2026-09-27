@@ -208,7 +208,7 @@ final class Preferences: ObservableObject {
         didSet { store.set(floatsOnLeave, forKey: "float.leave") }
     }
     /// A newer build is fetched, checked and put in place on its own, as it
-    /// always was. Off, Search still looks once a day and says so, and waits
+    /// always was. Off, Search still looks every hour and says so, and waits
     /// for Install in Settings (see Updater.installsOnItsOwn).
     @Published var installsUpdates: Bool {
         didSet {

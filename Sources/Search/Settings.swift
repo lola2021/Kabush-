@@ -454,7 +454,7 @@ struct SettingsPanel: View {
             Card {
                 Line(versionTitle, versionDetail) { versionControl }
                 Rule()
-                Line("Install updates on its own", "Off, Search still looks once a day and tells you, and installs only when you press Install") {
+                Line("Install updates on its own", "Off, Search still looks every hour and tells you, and installs only when you press Install") {
                     Switch(on: $prefs.installsUpdates)
                 }
                 Rule()
@@ -505,8 +505,8 @@ struct SettingsPanel: View {
     private var versionDetail: String {
         switch updater.stage {
         case .none:
-            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
-                ?? "Checked once a day on its own"
+            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — every hour on its own" }
+                ?? "Checked every hour on its own"
         case .fetching(let next):
             return next.notes ?? "Quietly, in the background — nothing you have set is touched"
         case .ready(let next):
@@ -532,11 +532,9 @@ struct SettingsPanel: View {
             Ring(size: 12)
         case .ready:
             Pill("Relaunch now", filled: true) { updater.relaunch() }
-        case .offered(let next):
-            Pill("Download", filled: true) {
-                browser.tuning = false
-                browser.open(next.dmg, foreground: true)
-            }
+        case .offered:
+            Pill(updater.fetchingDisk ? "Downloading…" : "Download", filled: true) { updater.openDisk() }
+                .disabled(updater.fetchingDisk)
         case .waiting:
             Pill("Install", filled: true) { updater.install() }
         }
