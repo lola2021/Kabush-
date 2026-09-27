@@ -2381,12 +2381,27 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘P. The system's own sheet, which is also where "save as PDF" lives.
     func printPage() {
         guard let tab = active, !tab.isBlank, let window = NSApp.keyWindow else { return }
+        Browser.printing(tab.web).runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// The print job for a page, or for one frame of it when WebKit names
+    /// one: a page's own print() in a frame prints that frame, as in Safari.
+    /// The frame's printing is outside the public framework, so it is asked
+    /// for first, and a WebKit without it prints the whole page.
+    static func printing(_ web: WKWebView, frame: AnyObject? = nil) -> NSPrintOperation {
         let info = NSPrintInfo.shared
         info.horizontalPagination = .fit
         info.isHorizontallyCentered = false
-        let job = tab.web.printOperation(with: info)
-        job.view?.frame = tab.web.bounds
-        job.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        let forFrame = NSSelectorFromString("_printOperationWithPrintInfo:forFrame:")
+        let job: NSPrintOperation
+        if let frame, web.responds(to: forFrame) {
+            typealias Make = @convention(c) (AnyObject, Selector, NSPrintInfo, AnyObject) -> NSPrintOperation
+            job = unsafeBitCast(web.method(for: forFrame), to: Make.self)(web, forFrame, info, frame)
+        } else {
+            job = web.printOperation(with: info)
+        }
+        job.view?.frame = web.bounds
+        return job
     }
 
     /// A space's row as its session left it, made without touching the one
@@ -3443,6 +3458,38 @@ extension Browser: WKDownloadDelegate {
         }
     }
 
+    /// A page's own print(): the Print… item in a page's own menu, or ⌘P in
+    /// an editor that keeps the key for itself (the page has it first, see
+    /// `pageFirst`). WebKit hands it to a delegate that answers this name,
+    /// outside the public framework, and to nobody otherwise: the button did
+    /// nothing at all, and neither did ⌘P.
+    ///
+    /// The page waits while the sheet is up, as it does in Safari: WebKit
+    /// holds its script until `done`, and draws the pages meanwhile. Only the
+    /// tab in front of the window you are in may ask, one sheet at a time: a
+    /// tab behind, or another window's, is answered with nothing, as Safari
+    /// does. And a page that asks again each time the sheet is cancelled
+    /// is left alone after the second cancel within ten seconds, until it
+    /// is another page (see PrintSheet).
+    @objc(_webView:printFrame:pdfFirstPageSize:completionHandler:)
+    func webView(
+        _ webView: WKWebView,
+        printFrame frame: NSObject,
+        pdfFirstPageSize: CGSize,
+        completionHandler done: @escaping () -> Void
+    ) {
+        guard let window = webView.window, window.isKeyWindow, window.attachedSheet == nil,
+              let tab = anyTab(for: webView), tab.id == activeID, !tab.isBlank,
+              PrintSheet.allows(tab)
+        else { done(); return }
+        let sheet = PrintSheet(tab) { done() }
+        Browser.printing(webView, frame: frame).runModal(
+            for: window, delegate: sheet,
+            didRun: #selector(PrintSheet.printOperationDidRun(_:success:contextInfo:)),
+            contextInfo: Unmanaged.passRetained(sheet).toOpaque()
+        )
+    }
+
     /// Where a file goes: the downloads folder, or wherever you say when
     /// Settings says to ask. Nil when the question was cancelled. The name
     /// comes from the page, so only its last part is taken: never a path
@@ -3488,5 +3535,45 @@ extension Browser: WKDownloadDelegate {
             n += 1
         }
         return candidate
+    }
+}
+
+/// What a page's print() is waiting on: told when the sheet has gone,
+/// printed or cancelled, so WebKit can let the page's script go on. The
+/// sheet's context keeps it alive until then.
+@MainActor
+final class PrintSheet: NSObject {
+    private let done: () -> Void
+    private let tab: Tab.ID
+    private let page: URL?
+
+    init(_ tab: Tab, _ done: @escaping () -> Void) {
+        self.tab = tab.id
+        self.page = tab.committed
+        self.done = done
+    }
+
+    /// The sheets a page's print() had cancelled, by tab, on the page it
+    /// was then: another page starts afresh.
+    private static var cancelled: [Tab.ID: (page: URL?, when: [Date])] = [:]
+
+    /// Whether this tab's page may bring the sheet up again: not after two
+    /// cancelled within ten seconds, which is a page asking in a loop.
+    static func allows(_ tab: Tab) -> Bool {
+        guard let seen = cancelled[tab.id], seen.page == tab.committed else {
+            cancelled[tab.id] = nil
+            return true
+        }
+        return seen.when.filter { Date().timeIntervalSince($0) < 10 }.count < 2
+    }
+
+    @objc func printOperationDidRun(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+        if let contextInfo { Unmanaged<PrintSheet>.fromOpaque(contextInfo).release() }
+        if !success {
+            var seen: (page: URL?, when: [Date]) = PrintSheet.cancelled[tab].flatMap { $0.page == page ? $0 : nil } ?? (page, [])
+            seen.when.append(Date())
+            PrintSheet.cancelled[tab] = seen
+        }
+        done()
     }
 }

@@ -143,6 +143,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A link from another app brings back a Search window you had put away in the Dock, where it opened the page in it and left it there. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#367](https://github.com/driceroland/Search/pull/367), [#95](https://github.com/driceroland/Search/issues/95))
 - A page on this Mac opened from the Finder keeps its pictures and styles when its tab wakes up or is reloaded, where it came back empty, and its tab wears the file name's first letter. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#366](https://github.com/driceroland/Search/pull/366))
 - Replace what came from a browser before no longer loses bookmarks when that browser's files don't read: what came from it before is kept, what could be read is added, and the sheet says so. A browser that reads cleanly and has fewer bookmarks than before is still replaced. Thanks [@lulkebit](https://github.com/lulkebit) ([#375](https://github.com/driceroland/Search/pull/375))
+- A page's own Print… button, and ⌘P in an editor that keeps the key for itself, bring up the print sheet, where they did nothing: only for the tab in front, one sheet at a time, and a page that asks again each time you cancel is left alone after the second. Thanks [@oddharsh](https://github.com/oddharsh) ([#379](https://github.com/driceroland/Search/pull/379))
 
 ## 1.0.3 — 24 September 2026
 
