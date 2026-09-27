@@ -39,6 +39,11 @@ final class Float {
 
     var showing: Bool { panel != nil }
 
+    /// Where a test run's bench opens the window instead: off every screen,
+    /// at the size it would have had, and not remembered (see `film float`
+    /// in Bench.swift). Nil everywhere else.
+    static var benchAway: NSPoint?
+
     /// Two fingers flick the window to a corner instead of pushing it
     /// along (Settings › General). Off unless asked for.
     static var flicks = false
@@ -65,12 +70,13 @@ final class Float {
         let screen = NSScreen.main?.visibleFrame ?? .zero
         // Where it was last, at the size it was, if a screen still shows it;
         // otherwise the bottom right of this one.
-        let spot = Float.remembered ?? NSRect(
+        var spot = Float.remembered ?? NSRect(
             x: screen.maxX - size.width - 24,
             y: screen.minY + 24,
             width: size.width,
             height: size.height
         )
+        if let away = Float.benchAway { spot.origin = away }
 
         let panel = Panel(
             contentRect: spot,
@@ -92,6 +98,8 @@ final class Float {
         // playing in the tab.
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
+        // The bench's, off every screen, is left out when a probe is hidden.
+        panel.canHide = Float.benchAway == nil
         panel.aspectRatio = size
         // Kept once a move or a resize is over, not on each step of one: at
         // the end of a resize by its edges, as it closes (see drop), and as
@@ -109,7 +117,11 @@ final class Float {
         ]
         panel.minSize = NSSize(width: 260, height: 146)
 
-        let ground = NSView(frame: NSRect(origin: .zero, size: size))
+        // At the size the window opens at. Built at the default size and
+        // then stretched to a remembered one, the page was laid out twice,
+        // and the first frames of video filled only part of the window
+        // (#257).
+        let ground = NSView(frame: NSRect(origin: .zero, size: spot.size))
         ground.wantsLayer = true
         ground.layer?.backgroundColor = NSColor.black.cgColor
         ground.layer?.cornerRadius = 14
@@ -177,7 +189,10 @@ final class Float {
             }
             return frame.width > 100 && shown ? frame : nil
         }
-        set { Store.settings.set(newValue.map(NSStringFromRect), forKey: "float.frame") }
+        set {
+            guard benchAway == nil else { return }
+            Store.settings.set(newValue.map(NSStringFromRect), forKey: "float.frame")
+        }
     }
 
     private var keeping: [NSObjectProtocol] = []
@@ -654,6 +669,9 @@ enum Isolate {
       }
       if (!best) return 'none';
 
+      // A landing still waiting for its tab is called off: the page is out
+      // again.
+      window.__officeFloatLanding = null;
       best.setAttribute('data-office-float', '');
       var sheet = document.getElementById('office-float');
       if (!sheet) {
@@ -759,6 +777,11 @@ enum Isolate {
     })();
     """
 
+    /// Everything back as it was — once the page is back in its tab and laid
+    /// out at the tab's size. Put back at once, while the page still had
+    /// the little window's size, the player fitted the video to that, and
+    /// the tab's first frames could show it so: YouTube's, 720×240 in a
+    /// 720×405 window, dropped to a strip before it grew again (#257).
     static let off = """
     (function () {
       // The engine may have put the video in its own floating window as well —
@@ -777,14 +800,32 @@ enum Isolate {
         }
       } catch (e) {}
 
-      clearInterval(window.__officeFloatWatch);
-      window.__officeFloatWatch = null;
-      document.documentElement.classList.remove('office-floating');
-      var sheet = document.getElementById('office-float');
-      if (sheet) sheet.textContent = '';
-      var video = document.querySelector('[data-office-float]');
-      if (video) video.removeAttribute('data-office-float');
-      return 'landed';
+      var root = document.documentElement;
+      var landing = window.__officeFloatLanding = {};
+      function put() {
+        // Floated again in the meantime: that is the float's now.
+        if (window.__officeFloatLanding !== landing) return;
+        window.__officeFloatLanding = null;
+        clearInterval(window.__officeFloatWatch);
+        window.__officeFloatWatch = null;
+        root.classList.remove('office-floating');
+        var sheet = document.getElementById('office-float');
+        if (sheet) sheet.textContent = '';
+        var video = document.querySelector('[data-office-float]');
+        if (video) video.removeAttribute('data-office-float');
+      }
+      // Each frame until the page is laid out at another size than the
+      // little window's — the tab's — and its player has had that frame's
+      // resize to fit the video to it. A page not drawn, its tab no longer
+      // the one in front, is put back by the clock.
+      var wide = innerWidth, high = innerHeight, began = Date.now();
+      (function frame() {
+        if (window.__officeFloatLanding !== landing) return;
+        if (innerWidth !== wide || innerHeight !== high || Date.now() - began > 400) return put();
+        requestAnimationFrame(frame);
+      })();
+      setTimeout(put, 1000);
+      return 'landing';
     })();
     """
 }

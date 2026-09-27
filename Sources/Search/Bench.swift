@@ -1292,6 +1292,202 @@ final class Bench {
                 }
             }
 
+        case "film" where ["float", "land"].contains(request["action"] as? String ?? ""):
+            // The video going out into its floating window, or back into its
+            // tab (#257), recorded by the page itself on every frame it
+            // draws: the size it is laid out at, the video's box in it, and
+            // whether everything else is out of the way. Beside it, how much
+            // of the view it is in the video fills.
+            //
+            // Only from a probe started hidden, and it stays hidden. The
+            // little window opens off every screen, and the tab's stage is
+            // lent to a borderless window off every screen for the filming;
+            // those two are left out of the hiding, so WebKit draws the page
+            // in them as it would for a person. (Showing the app instead,
+            // with the browser's window moved off the screens, put that
+            // window back on one: a titled window is put on a screen as it
+            // is shown.)
+            guard Store.testing else { answer(["error": "film only works on a --test run"]); return }
+            guard NSApp.isHidden else { answer(["error": "film float needs a probe started hidden"]); return }
+            guard let window = Links.window, let path = request["path"] as? String, !path.isEmpty
+            else { answer(["error": "film float needs the browser's window (bench window) and a path"]); return }
+            let out = request["action"] as? String == "float"
+            let floated = browser.floating.flatMap { id in browser.tabs.first { $0.id == id } }
+            guard let tab = out ? browser.active : floated, out != browser.floater.showing
+            else { answer(["error": out ? "already floating, or no tab" : "nothing is floating"]); return }
+            func stages(in view: NSView) -> [StageView] {
+                (view as? StageView).map { [$0] } ?? view.subviews.flatMap(stages)
+            }
+            guard let root = window.contentView,
+                  let stage = stages(in: root).filter({ !$0.isHiddenOrHasHiddenAncestor })
+                      .max(by: { $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height }),
+                  let home = stage.superview
+            else { answer(["error": "no stage in the window"]); return }
+            let seconds = min(4, max(0.1, request["seconds"] as? Double ?? 1))
+            Float.benchAway = NSPoint(x: -20000, y: -20000)
+            let hall = self.hall ?? {
+                let hall = NSWindow(contentRect: NSRect(x: -20000, y: -22000, width: 100, height: 100),
+                                    styleMask: [.borderless], backing: .buffered, defer: false)
+                hall.isReleasedWhenClosed = false
+                hall.isExcludedFromWindowsMenu = true
+                hall.collectionBehavior = [.transient, .ignoresCycle, .stationary]
+                hall.hasShadow = false
+                // Left out of the hiding. It also keeps AppKit from taking
+                // the little window, closing, for the last one and quitting.
+                hall.canHide = false
+                self.hall = hall
+                return hall
+            }()
+            hall.setFrame(NSRect(x: -20000, y: -22000, width: stage.frame.width, height: stage.frame.height), display: false)
+            hall.orderBack(nil)
+            let place = stage.frame
+            let after = home.subviews.firstIndex(of: stage).flatMap { home.subviews.indices.contains($0 + 1) ? home.subviews[$0 + 1] : nil }
+            stage.removeFromSuperview()
+            stage.frame = NSRect(origin: .zero, size: place.size)
+            hall.contentView?.addSubview(stage)
+            func giveBack() {
+                stage.removeFromSuperview()
+                stage.frame = place
+                if let after, after.superview === home {
+                    home.addSubview(stage, positioned: .below, relativeTo: after)
+                } else {
+                    home.addSubview(stage)
+                }
+            }
+            // A window off every screen counts as covered, and WebKit draws
+            // nothing it thinks nobody sees.
+            let web = tab.web
+            let occlusion = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
+            if web.responds(to: occlusion) {
+                typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+                unsafeBitCast(web.method(for: occlusion), to: Setter.self)(web, occlusion, false)
+            }
+            let record = """
+            (function () {
+              var log = window.__benchFilm = [], t0 = performance.now();
+              function look() {
+                var v = document.querySelector('[data-office-float]');
+                if (!v) {
+                  var all = document.querySelectorAll('video'), most = -1;
+                  for (var i = 0; i < all.length; i++) {
+                    var b = all[i].getBoundingClientRect();
+                    if (b.width * b.height > most) { most = b.width * b.height; v = all[i]; }
+                  }
+                }
+                var on = document.documentElement.classList.contains('office-floating') ? 1 : 0;
+                var r = v ? v.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                log.push([Math.round(performance.now() - t0), innerWidth, innerHeight, r.left, r.top, r.width, r.height,
+                          v ? v.videoWidth : 0, v ? v.videoHeight : 0, on,
+                          v && !v.paused ? 1 : 0, document.visibilityState === 'visible' ? 1 : 0]);
+              }
+              // And each time the float's class comes or goes, the size the
+              // page had then.
+              var turns = window.__benchTurns = [];
+              new MutationObserver(function () {
+                var on = document.documentElement.classList.contains('office-floating') ? 1 : 0;
+                if (!turns.length || turns[turns.length - 1][3] !== on)
+                  turns.push([Math.round(performance.now() - t0), innerWidth, innerHeight, on]);
+              }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+              // Looked at just after each frame is drawn, whatever order the
+              // frame's own callbacks — a landing's among them — ran in.
+              var drawn = new MessageChannel();
+              drawn.port1.onmessage = function () {
+                look();
+                if (performance.now() - t0 < \(Int(seconds * 1000))) requestAnimationFrame(frame);
+              };
+              function frame() { drawn.port2.postMessage(0); }
+              requestAnimationFrame(frame);
+              return true;
+            })();
+            """
+            // Where the page is, from this side, every few hundredths.
+            var hosts: [[String: Any]] = []
+            var started = CACurrentMediaTime()
+            // Every size the web view is given on the way, however briefly:
+            // each one is a layout WebKit is asked for.
+            var sizes: [[Int]] = []
+            web.postsFrameChangedNotifications = true
+            let resized = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: web, queue: nil) { _ in
+                MainActor.assumeIsolated {
+                    let size = web.frame.size
+                    if sizes.last.map({ $0[1] != Int(size.width) || $0[2] != Int(size.height) }) ?? true {
+                        sizes.append([Int((CACurrentMediaTime() - started) * 1000), Int(size.width), Int(size.height)])
+                    }
+                }
+            }
+            func watch() {
+                let showing = NSApp.windows.filter { w in w.isVisible && NSScreen.screens.contains { $0.frame.intersects(w.frame) } }
+                if !showing.isEmpty { NSApp.hide(nil) }
+                let view = web.bounds.size
+                hosts.append(["t": Int((CACurrentMediaTime() - started) * 1000),
+                              "in": web.window === hall ? "tab" : web.window == nil ? "none" : "float",
+                              "view": [Int(view.width), Int(view.height)], "showing": showing.map { "\(type(of: $0))" }])
+                guard CACurrentMediaTime() - started < seconds else { return finish(view) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { watch() }
+            }
+            func finish(_ view: NSSize) {
+                NotificationCenter.default.removeObserver(resized)
+                web.evaluateInSearch("[window.__benchFilm, window.__benchTurns]") { found in
+                    MainActor.assumeIsolated {
+                        giveBack()
+                        let both = found as? [Any] ?? []
+                        let rows = (both.first as? [[Any]] ?? []).map { $0.map { ($0 as? NSNumber)?.doubleValue ?? 0 } }
+                        let turns = (both.last as? [[Any]] ?? []).map { $0.map { ($0 as? NSNumber)?.intValue ?? 0 } }
+                        let fill = { (part: CGFloat, whole: CGFloat) in whole > 0 ? (part / whole * 1000).rounded() / 1000 : 0 }
+                        let frames: [[String: Any]] = rows.filter { $0.count == 12 }.map { n in
+                            // The picture inside the video's box, fitted as
+                            // `contain` fits it, cut to what both the page
+                            // and the view it ends up in show.
+                            var picture = NSRect(x: n[3], y: n[4], width: n[5], height: n[6])
+                            if n[7] > 0, n[8] > 0, n[5] > 0, n[6] > 0 {
+                                let scale = min(n[5] / n[7], n[6] / n[8])
+                                picture = NSRect(x: n[3] + (n[5] - n[7] * scale) / 2, y: n[4] + (n[6] - n[8] * scale) / 2,
+                                                 width: n[7] * scale, height: n[8] * scale)
+                            }
+                            let seen = picture.intersection(NSRect(x: 0, y: 0, width: min(n[1], view.width), height: min(n[2], view.height)))
+                            return ["t": Int(n[0]), "page": [Int(n[1]), Int(n[2])], "video": [Int(n[5].rounded()), Int(n[6].rounded())],
+                                    "isolated": n[9] == 1, "playing": n[10] == 1, "seen": n[11] == 1,
+                                    "fill": seen.isNull ? [0, 0] : [fill(seen.width, view.width), fill(seen.height, view.height)]]
+                        }
+                        let result: [String: Any] = ["view": [Int(view.width), Int(view.height)], "frames": frames, "hosts": hosts,
+                                                     "sizes": sizes, "turns": turns]
+                        if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted]) {
+                            try? data.write(to: URL(fileURLWithPath: path + ".json"))
+                        }
+                        answer(["frames": frames.count, "saved": path + ".json"])
+                    }
+                }
+            }
+            // A video paused while its page was out of sight — WebKit stops
+            // a muted one nobody can see — started again, now that it can
+            // be seen: in the page's own world, through its player where it
+            // has one (YouTube's pauses a video started behind its back).
+            // Then the page draws a few frames where it is, and moves.
+            let start = """
+            (function () {
+              var v = document.querySelector('video'), p = document.getElementById('movie_player');
+              if (!\(out) || !v || !v.paused) return 0;
+              v.muted = true;
+              if (p && p.playVideo) { if (p.mute) p.mute(); p.playVideo(); } else v.play();
+              return 1;
+            })();
+            """
+            web.evaluateJavaScript(start) { restarted, _ in
+                MainActor.assumeIsolated {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + ((restarted as? Int) == 1 ? 1 : 0)) {
+                        web.evaluateInSearch(record) { _ in
+                            MainActor.assumeIsolated {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    started = CACurrentMediaTime()
+                                    watch()
+                                    browser.toggleFloat()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
         case "film":
             // The whole window, title bar and lights included, drawn every few
             // hundredths of a second while something animates — what a person
@@ -1809,6 +2005,8 @@ final class Bench {
     // MARK: - the room off screen
 
     private var room: NSWindow?
+    /// Where `film float` lends the tab's stage, off every screen.
+    private var hall: NSWindow?
 
     /// A page nobody is looking at has to be somewhere to be laid out at all.
     /// The stage takes it back the moment you pick its tab, and it comes
