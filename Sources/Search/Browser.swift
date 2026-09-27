@@ -2253,11 +2253,11 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// A page for the bench: at the end of the row, behind whatever you are
-    /// looking at, and marked as not yours.
+    /// looking at, and marked as not yours. `shy`: a private one, for a test run.
     @discardableResult
-    func benchOpen(_ url: URL) -> Tab {
+    func benchOpen(_ url: URL, shy: Bool = false) -> Tab {
         let url = Browser.page(url)
-        let tab = Tab(bench: true, configuration: Browser.extensionConfiguration(for: url))
+        let tab = Tab(shy: shy, bench: true, configuration: shy ? nil : Browser.extensionConfiguration(for: url))
         prepare(tab)
         tabs.append(tab)
         tab.go(to: url)
@@ -2873,11 +2873,30 @@ final class Browser: NSObject, ObservableObject {
 // MARK: - WebKit
 
 extension Browser: WKNavigationDelegate, WKUIDelegate {
-    /// Links the window has no business showing — mail, calls, an app's own
-    /// scheme — are handed to whoever does own them.
+    /// Every navigation is decided in `decide` below; this form of the
+    /// question also hands over the page's preferences, the only place a
+    /// site allowed to play sound by itself can say so (see Autoplay). Only
+    /// a page that is allowed to load, in the tab's own frame, is touched.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor action: WKNavigationAction,
+        preferences: WKWebpagePreferences,
+        decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void
+    ) {
+        decide(webView, action) { [weak self] policy in
+            if policy == .allow, action.targetFrame?.isMainFrame ?? true, let url = action.request.url {
+                let shy = self?.tab(for: webView)?.shy == true || !webView.configuration.websiteDataStore.isPersistent
+                Autoplay.apply(to: preferences, for: url, shy: shy)
+            }
+            decisionHandler(policy, preferences)
+        }
+    }
+
+    /// Links the window has no business showing — mail, calls, an app's own
+    /// scheme — are handed to whoever does own them.
+    private func decide(
+        _ webView: WKWebView,
+        _ action: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
         // "Download Image", "Download Linked File" from the page's own
