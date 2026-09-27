@@ -545,7 +545,7 @@ struct SettingsPanel: View {
                     Switch(on: Binding(get: { !prefs.keepsSignIns }, set: { prefs.keepsSignIns = !$0 }))
                 }
                 Rule()
-                Line("Camera and microphone", "What each site was allowed or refused") {
+                Line("Camera, microphone and location", "What each site was allowed or refused") {
                     Pill("Forget choices") { browser.forgetCaptureChoices() }
                 }
             }

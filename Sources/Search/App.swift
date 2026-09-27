@@ -657,14 +657,14 @@ struct ContentView: View {
     /// with the answer remembered so it is asked once and not every call.
     private func captureAsking(_ ask: Browser.CaptureAsk) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: ask.wants == "microphone" ? "mic" : "video")
+            Image(systemName: ask.wants == "location" ? "location" : ask.wants == "microphone" ? "mic" : "video")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
-            Text("\(ask.host) wants to use your \(ask.wants)")
+            Text(ask.wants == "location" ? "\(ask.host) wants to know your location" : "\(ask.host) wants to use your \(ask.wants)")
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.ink)
-            Button { browser.allowCapture() } label: {
-                Text("Allow")
+            Button { ask.once ? browser.allowCaptureOnce() : browser.allowCapture() } label: {
+                Text(ask.once ? "Allow once" : "Allow")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.ground)
                     .padding(.horizontal, 11)
@@ -672,6 +672,14 @@ struct ContentView: View {
                     .background(Palette.ink, in: Capsule())
             }
             .buttonStyle(.plain)
+            if ask.once, ask.keeps {
+                Button { browser.allowCapture() } label: {
+                    Text("Always allow")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.ink)
+                }
+                .buttonStyle(.plain)
+            }
             Button { browser.denyCapture() } label: {
                 Text("Don't allow")
                     .font(.system(size: 12))

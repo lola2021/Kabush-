@@ -60,6 +60,8 @@
     ./bench field TEXT [type] [go]     test run: TEXT pasted into the address field (type: a key at a time),
                                        each timed until the window has caught up; go: then Return, timed
                                        until the page is loading
+    ./bench visible ID                 test run: the tab counts as seen, for what WebKit holds until a page is
+    ./bench answer once|always|no     test run: the card of a page asking for the camera, microphone or location
     ./bench accounts [ROW]             test run: the list under the sign-in box the caret is in (passkeys,
                                        then passwords); ROW: a click on that row, from 0
     ./bench pull DX [STEPS] [MS]       test run: two fingers DX points sideways over the page (back is +) — where it went
@@ -177,7 +179,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "select"):
+    elif verb in ("text", "close", "sleep", "select", "visible"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":
@@ -398,6 +400,9 @@ def main(argv):
             elif word == "case": request["case"] = True
             elif word == "words": request["words"] = True
             else: sys.exit("usage: bench find TEXT [next N] [back N] [case] [words]")
+    elif verb == "answer":
+        if args not in (["once"], ["always"], ["no"]): sys.exit("usage: bench answer once|always|no")
+        request["with"] = args[0]
     elif verb == "accounts":
         if len(args) not in (0, 1) or (args and not args[0].isdigit()): sys.exit("usage: bench accounts [ROW]")
         if args: request["pick"] = int(args[0])

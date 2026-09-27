@@ -653,6 +653,8 @@ final class Bench {
             case .denied: out["passkeyAccess"] = "denied"
             default: out["passkeyAccess"] = "notDetermined"
             }
+            out["asking"] = browser.asking.map { "\($0.host) \($0.wants)" + ($0.once ? " once" : "") + ($0.keeps ? "" : " unkept") } ?? ""
+            out["locationAnswered"] = Browser.locationAnswered ?? ""
             out["passkeyAsks"] = Passkeys.asked
             out["handedOff"] = Browser.handedOff
             out["passkeyLast"] = Passkeys.last
@@ -1077,6 +1079,47 @@ final class Bench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { settled(tries + 1) }
             }
             settled(0)
+        case "visible":
+            // A tab in a probe that nobody sees counts as seen: WebKit keeps
+            // back what waits for the page to be looked at — a page asking
+            // where you are, among others — and a hidden window is never
+            // looked at. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "visible only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            // Lent, for the rest of the run, to a borderless window off every
+            // screen that isn't hidden with the app (as `film` does), and told
+            // to count as seen there.
+            let lookout = NSWindow(contentRect: NSRect(x: -20000, y: -24000, width: 1024, height: 700),
+                                   styleMask: [.borderless], backing: .buffered, defer: false)
+            lookout.isReleasedWhenClosed = false
+            lookout.isExcludedFromWindowsMenu = true
+            lookout.collectionBehavior = [.transient, .ignoresCycle, .stationary]
+            lookout.hasShadow = false
+            lookout.canHide = false
+            lookout.orderBack(nil)
+            let web = tab.web
+            web.removeFromSuperview()
+            web.frame = NSRect(x: 0, y: 0, width: 1024, height: 700)
+            lookout.contentView?.addSubview(web)
+            lookouts.append(lookout)
+            let occlusion = NSSelectorFromString("_setWindowOcclusionDetectionEnabled:")
+            if web.responds(to: occlusion) {
+                typealias Setter = @convention(c) (AnyObject, Selector, Bool) -> Void
+                unsafeBitCast(web.method(for: occlusion), to: Setter.self)(web, occlusion, false)
+            }
+            answer(["ok": true])
+
+        case "answer":
+            // The card of a page asking for the camera, microphone or your
+            // location: once, always or no. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "answer only works on a --test run"]); return }
+            switch request["with"] as? String {
+            case "once": browser.allowCaptureOnce()
+            case "always": browser.allowCapture()
+            case "no": browser.denyCapture()
+            default: answer(["error": "answer once|always|no"]); return
+            }
+            answer(["asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "", "locationAnswered": Browser.locationAnswered ?? ""])
 
         case "accounts":
             // The list under the sign-in box the caret is in — passkeys, then
@@ -2003,7 +2046,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find", "answer", "visible",
             ]])
         }
     }
@@ -2216,6 +2259,9 @@ final class Bench {
         tab.web.autoresizingMask = [.width, .height]
         window.contentView?.addSubview(tab.web)
     }
+
+    /// The windows off every screen that `visible` lent tabs to.
+    private var lookouts: [NSWindow] = []
 
     private func makeRoom() -> NSWindow {
         // Off every screen, and never key or main: it exists so that a web

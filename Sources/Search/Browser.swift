@@ -886,6 +886,13 @@ final class Browser: NSObject, ObservableObject {
     struct CaptureAsk: Equatable, Identifiable {
         let host: String
         let wants: String
+        /// Location is also given for this once, and kept only when you say
+        /// always; in a private tab it is never kept.
+        var once = false
+        var keeps = true
+        /// When it came up. A page can time a click to land where Allow is
+        /// about to be: the card takes none in its first half second.
+        var shown = Date()
         var id: String { host + wants }
     }
 
@@ -894,16 +901,17 @@ final class Browser: NSObject, ObservableObject {
     private var askedAbout = ""
 
     func allowCapture() { answerCapture(.grant) }
+    func allowCaptureOnce() { answerCapture(.grant, keep: false) }
     func denyCapture() { answerCapture(.deny) }
 
-    private func answerCapture(_ decision: WKPermissionDecision) {
-        guard let decide else { return }
+    private func answerCapture(_ decision: WKPermissionDecision, keep: Bool = true) {
+        guard let decide, let asking, Date().timeIntervalSince(asking.shown) > 0.5 else { return }
         // Remembered per site, so a call you take every week asks once.
-        if !askedAbout.isEmpty { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
+        if keep, !askedAbout.isEmpty { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
         decide(decision)
         self.decide = nil
         askedAbout = ""
-        asking = nil
+        self.asking = nil
     }
 
     /// Everything a site has been allowed or refused, for the day you want to
@@ -913,8 +921,13 @@ final class Browser: NSObject, ObservableObject {
         where key.hasPrefix("capture.") {
             Store.settings.removeObject(forKey: key)
         }
-        announce("Camera and microphone choices forgotten")
+        announce("Camera, microphone and location choices forgotten")
     }
+
+    /// What was last answered to a page asking where you are, in a test run
+    /// — which never goes on to ask the Mac: that would put macOS's own
+    /// question on the screen of whoever is working beside it.
+    private(set) static var locationAnswered: String?
 
     // MARK: - pinning
 
@@ -3473,6 +3486,54 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         decide = decisionHandler
         askedAbout = shy ? "" : key
         asking = CaptureAsk(host: host, wants: Browser.name(for: type))
+    }
+
+    /// A page asking where you are. WebKit asks this through a delegate
+    /// method that isn't public on the Mac; unanswered, every page is refused.
+    ///
+    /// Only the page on screen, and only for itself: the tab in front, and
+    /// the page's own origin or a frame of that same origin. WebKit already
+    /// keeps frames from elsewhere out unless the page lets them in
+    /// (allow="geolocation"); here they don't get to borrow the page's
+    /// answer at all. Remembered per origin, as the camera is, and never for
+    /// a private tab.
+    @objc(_webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:)
+    func askedForLocation(
+        _ webView: WKWebView,
+        origin: WKSecurityOrigin,
+        frame: WKFrameInfo,
+        decisionHandler: @escaping (WKPermissionDecision) -> Void
+    ) {
+        let give: (WKPermissionDecision) -> Void = { decision in
+            guard Store.testing else { return decisionHandler(decision) }
+            Browser.locationAnswered = decision == .grant ? "granted" : "denied"
+            decisionHandler(.deny)
+        }
+        // WebKit names the page's origin for a frame it let in, whoever the
+        // frame is: the frame's own is what counts.
+        let site = Browser.origin(origin.protocol, origin.host, origin.port)
+        let asker = frame.securityOrigin
+        guard let tab = tab(for: webView), tab.id == activeID, !origin.host.isEmpty,
+              let page = webView.url, let scheme = page.scheme, let host = page.host(),
+              site == Browser.origin(scheme, host, page.port ?? 0),
+              Browser.origin(asker.protocol, asker.host, asker.port) == site
+        else { return give(.deny) }
+        let key = "\(site)|location"
+        if !tab.shy, let remembered = Store.settings.object(forKey: "capture." + key) as? Bool {
+            return give(remembered ? .grant : .deny)
+        }
+        // One question at a time, as for the camera.
+        guard decide == nil else { return give(.deny) }
+        decide = give
+        askedAbout = tab.shy ? "" : key
+        asking = CaptureAsk(host: origin.host, wants: "location", once: true, keeps: !tab.shy)
+    }
+
+    /// "scheme://host[:port]", the way an origin is kept for its answers.
+    private static func origin(_ scheme: String, _ host: String, _ port: Int) -> String {
+        let scheme = scheme.lowercased(), host = host.lowercased()
+        let standard = (scheme == "https" && port == 443) || (scheme == "http" && port == 80)
+        return "\(scheme)://\(host)" + (port == 0 || standard ? "" : ":\(port)")
     }
 
     private static func name(for type: WKMediaCaptureType) -> String {
