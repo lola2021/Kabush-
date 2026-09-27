@@ -1623,15 +1623,33 @@ final class Browser: NSObject, ObservableObject {
         return group.collapsed ? members.filter { $0.id == activeID } : members
     }
 
-    func step(_ direction: Int) {
-        guard tabs.count > 1, let here = tabs.firstIndex(where: { $0.id == activeID }) else { return }
-        let next = (here + direction + tabs.count) % tabs.count
-        select(tabs[next])
+    /// The tabs as they are on screen: with groups on, the ones folded away
+    /// in a group are not among them. ⌘1–9 and ⌃Tab count these, so the key
+    /// goes to the tab you see in that place, never to one you can't.
+    var shownTabs: [Tab] {
+        guard prefs.usesTabGroups else { return tabs }
+        return tabs.filter { $0.pin != nil }
+            + tabGroups.flatMap { visibleTabs(in: $0) }
+            + tabs(in: nil)
     }
 
+    /// ⌃Tab, ⌃⇧Tab: the next tab on screen, round to the first again. It
+    /// walks the whole row from the tab you are on, so it finds its way out
+    /// even when that tab is one the row doesn't show.
+    func step(_ direction: Int) {
+        guard tabs.count > 1, let here = tabs.firstIndex(where: { $0.id == activeID }) else { return }
+        let shown = Set(shownTabs.map(\.id))
+        for n in 1..<tabs.count {
+            let next = tabs[((here + direction * n) % tabs.count + tabs.count) % tabs.count]
+            if shown.contains(next.id) { select(next); return }
+        }
+    }
+
+    /// ⌘1–8: the tab in that place on screen.
     func select(index: Int) {
-        guard tabs.indices.contains(index) else { return }
-        select(tabs[index])
+        let shown = shownTabs
+        guard shown.indices.contains(index) else { return }
+        select(shown[index])
     }
 
     /// ⌃Tab with the switcher on: the space's tabs, the most recently used
