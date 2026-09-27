@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Switching spaces, the space's name shows for a moment beside its icon, where the tabs are, rather than at the bottom of the window; with the tabs folded away it still shows at the bottom.
 - A double-click on the pinned tab you are on takes it back to the page it was pinned at, wherever you have wandered since; already there, it changes the pin's letter as before. Thanks [@armin-ahmadii](https://github.com/armin-ahmadii) for the idea ([#141](https://github.com/driceroland/Search/issues/141))
 - A pinned tab shows the loading ring while its page comes, as other tabs do, in the bar and the column.
 - Downloads show while they happen: a small circle beside the other buttons fills as a file comes, turns into an arrow once it is in, and opens Downloads when clicked; it is there only while something downloads and a moment after. The file shows its progress in the Finder and on the Dock's Downloads stack, as Safari's do, and the "Saved" line at the bottom shows it in the Finder when clicked.

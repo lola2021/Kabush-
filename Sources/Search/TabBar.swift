@@ -41,7 +41,9 @@ struct TabBar: View {
                     // Back, forward and reload by the lights, when asked.
                     if browser.prefs.navigationLeft { Helm(browser: browser) }
                     // The space on screen, first, when there are spaces.
-                    if browser.prefs.usesSpaces { SpaceDot(browser: browser) }
+                    // Above the tabs, for the name it shows over them a moment
+                    // after a switch.
+                    if browser.prefs.usesSpaces { SpaceDot(browser: browser).zIndex(1) }
 
                     // The tabs, in a run of their own. While they fit, it is
                     // exactly as wide as they are and nothing about the row
