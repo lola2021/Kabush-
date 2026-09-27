@@ -555,8 +555,11 @@ private struct PinSquare: View {
         .frame(width: width, height: height)
         .background {
             if live {
+                // Darker than the resting squares' grey by as much as a live
+                // row is darker than the white it sits on (Drice: the live
+                // pin barely showed among the others).
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(Palette.wash)
+                    .fill(Palette.pinLive)
                     .matchedGeometryEffect(id: "live", in: pill)
             } else {
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)

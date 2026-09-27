@@ -596,7 +596,9 @@ private struct TabPill: View {
             // the one thing in the window that says how far in you are, and
             // it says it without adding anything to the window.
             ZStack(alignment: .leading) {
-                Rectangle().fill(Palette.wash)
+                // A pinned square among the faint grey of the others: the
+                // darker grey the column's live pin wears too.
+                Rectangle().fill(pinned ? Palette.pinLive : Palette.wash)
                 // Not on a pinned square, nor a tab down to its mark. Thirty
                 // points of grey filling from the left behind a single letter
                 // says nothing about anything — it needs the width of a title
