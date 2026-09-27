@@ -77,7 +77,11 @@ extension Browser {
         if downloading.contains(where: { $0.webView === web }) { return "downloading" }
         if heldDialogs[tab.id]?.isEmpty == false { return "a question waiting" }
         // A sign-in window hands its answer back to the page that opened it.
-        if tabs.contains(where: { visibleTabIDs.contains($0.id) && $0.opener == tab.id }) {
+        if let pair = activeSplit {
+            if tabs.contains(where: { pair.contains($0.id) && $0.opener == tab.id }) {
+                return "the page on screen came from it"
+            }
+        } else if active?.opener == tab.id {
             return "the page on screen came from it"
         }
         return nil

@@ -117,7 +117,7 @@ private struct SplitPane: View {
             }
 
             if browser.fieldShowing && browser.activeID == tab.id && browser.activeSplit != nil {
-                Omnibox(browser: browser, over: !tab.isBlank)
+                Omnibox(browser: browser, over: !tab.isBlank, fitted: true)
                     .transition(.scale(scale: 0.97).combined(with: .opacity))
             }
         }

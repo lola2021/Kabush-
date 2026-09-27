@@ -10,7 +10,7 @@ struct FindBar: View {
 
     private var narrow: Bool { availableWidth.map { $0 < 290 } ?? false }
     private var fieldWidth: CGFloat {
-        guard let availableWidth else { return 160 }
+        guard let availableWidth else { return 150 }
         return max(40, min(160, availableWidth - (narrow ? 80 : 130)))
     }
 

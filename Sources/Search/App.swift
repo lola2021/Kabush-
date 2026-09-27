@@ -378,10 +378,35 @@ struct ContentView: View {
         .onChange(of: chrome) { old, new in make(room: new, after: old) }
     }
 
+    // With Split View off, the stage is the one it always was: a single
+    // Page that is never rebuilt from one tab to the next (see Stage.swift).
+    @ViewBuilder
     private var stage: some View {
-        BrowserStage(browser: browser) { tab in
-            guard browser.activeSplit != nil, browser.activeID != tab.id else { return }
-            browser.focusPane(tab)
+        if browser.prefs.splitView {
+            BrowserStage(browser: browser) { tab in
+                guard browser.activeSplit != nil, browser.activeID != tab.id else { return }
+                browser.focusPane(tab)
+            }
+        } else if let tab = browser.active {
+            Page(tab: tab)
+                .overlay {
+                    if browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if browser.finding {
+                        FindBar(browser: browser)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if let asked = browser.suggesting, asked.tab == tab.id {
+                        AccountList(browser: browser, asked: asked)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.quick, value: browser.suggesting)
+        } else {
+            Palette.ground
         }
     }
 
@@ -787,6 +812,7 @@ struct ContentView: View {
 
     /// Either visible pane may give its page to WebKit's fullscreen window.
     private var fullscreenTab: Tab? {
+        guard browser.prefs.splitView else { return browser.active?.immersed == true ? browser.active : nil }
         _ = immersionRevision
         if let split = browser.activeSplit,
            let immersed = browser.tabs.first(where: { split.contains($0.id) && $0.immersed }) {
@@ -797,7 +823,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var fullscreenWatch: some View {
-        if let split = browser.activeSplit {
+        if !browser.prefs.splitView {
+            // Nothing to watch: the page on screen is the only one.
+        } else if let split = browser.activeSplit {
             if let left = browser.tabs.first(where: { $0.id == split.left }) {
                 TabImmersionWatch(tab: left) { immersionRevision += 1 }.id(left.id)
             }
