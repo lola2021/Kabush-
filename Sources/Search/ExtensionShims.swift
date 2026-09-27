@@ -1911,15 +1911,19 @@ enum ExtensionShims {
           if (typeof callback !== "function") return pr;
           pr.then((v) => callback(v), (e) => withLastError(e, callback));
         };
+        // Extension pages are never an extension's to reach, as in Chrome,
+        // where such a pattern isn't even valid (see
+        // Extensions.reachesExtensions): never held, never asked for.
+        const extensionPages = (origins) => origins.some((o) => /^(chrome|webkit)-extension:/i.test(String(o)));
         put(p, "contains", withCb(async ({ permissions = [], origins = [] }) => {
           const { theirs, mine, unknown } = split(permissions);
-          if (unknown.length) return false;
+          if (unknown.length || extensionPages(origins)) return false;
           if (mine.length) { const have = await granted(); if (!mine.every((m) => have.has(m))) return false; }
           return theirs.length || origins.length ? contains({ permissions: theirs, origins }) : true;
         }));
         put(p, "request", withCb(async ({ permissions = [], origins = [] }) => {
           const { theirs, mine, unknown } = split(permissions);
-          if (unknown.length) return false;
+          if (unknown.length || extensionPages(origins)) return false;
           if (mine.length) {
             const have = await granted();
             const missing = mine.filter((m) => !have.has(m));
@@ -3344,6 +3348,7 @@ enum ExtensionShims {
             let found = context.webExtension
             let wanted = ((first as? [String]) ?? []).map { WKWebExtension.Permission(rawValue: $0) }
             let origins = ((args.dropFirst().first as? [String]) ?? []).compactMap { try? WKWebExtension.MatchPattern(string: $0) }
+                .filter { !Extensions.reachesExtensions($0) }
             let named = found.requestedPermissions.union(found.optionalPermissions)
             // Sites as the manifest names them, optional ones included —
             // which allRequestedMatchPatterns leaves out.
@@ -3361,6 +3366,7 @@ enum ExtensionShims {
             guard await owner.ask(question, detail: detail, context: context) else { return false }
             for permission in missing { context.setPermissionStatus(.grantedExplicitly, for: permission) }
             for pattern in unreached { context.setPermissionStatus(.grantedExplicitly, for: pattern) }
+            Extensions.fence(context)
             return true
         case "permissions.remove":
             let gone = Set((first as? [String]) ?? [])

@@ -182,20 +182,23 @@ extension Browser {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "\(host) can't prove who it is"
-        alert.informativeText = "Its certificate isn't trusted by this Mac. Someone could be reading what you send. Continue only if you know why it looks like this."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Go Back")
-        alert.addButton(withTitle: "Continue Anyway")
-        Dialogs.show(alert, over: webView) { answer in
-            guard answer == .alertSecondButtonReturn else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-                return
+        // Over its own tab only, as a page's own questions are (see ask).
+        ask(from: webView, show: {
+            let alert = NSAlert()
+            alert.messageText = "\(host) can't prove who it is"
+            alert.informativeText = "Its certificate isn't trusted by this Mac. Someone could be reading what you send. Continue only if you know why it looks like this."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Go Back")
+            alert.addButton(withTitle: "Continue Anyway")
+            Dialogs.show(alert, over: webView) { answer in
+                guard answer == .alertSecondButtonReturn else {
+                    completionHandler(.cancelAuthenticationChallenge, nil)
+                    return
+                }
+                Dialogs.excused.insert(host)
+                completionHandler(.useCredential, URLCredential(trust: trust))
             }
-            Dialogs.excused.insert(host)
-            completionHandler(.useCredential, URLCredential(trust: trust))
-        }
+        }, drop: { completionHandler(.cancelAuthenticationChallenge, nil) })
     }
 
     /// A site behind a name and a password — a staging server, a router. One
@@ -209,6 +212,19 @@ extension Browser {
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
+        // A tab behind yours asking for a name and a password would put the
+        // question over the page you are looking at, where it would pass for
+        // that page's. It waits for its own tab, as a page's questions do.
+        ask(from: webView, show: { [weak self] in
+            self?.askSignIn(webView, challenge, completionHandler)
+        }, drop: { completionHandler(.cancelAuthenticationChallenge, nil) })
+    }
+
+    private func askSignIn(
+        _ webView: WKWebView,
+        _ challenge: URLAuthenticationChallenge,
+        _ completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
         let space = challenge.protectionSpace
         let alert = NSAlert()
         alert.messageText = "\(space.host) asks you to sign in"

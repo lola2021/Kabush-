@@ -3582,15 +3582,18 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             return
         }
         let name = FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: "")
-        let alert = NSAlert()
-        alert.messageText = "Open \u{201C}\(name)\u{201D}?"
-        alert.informativeText = "\(webView.url?.host() ?? "This page") wants to open \(name)."
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
-        Dialogs.show(alert, over: webView) { answer in
-            guard answer == .alertFirstButtonReturn else { return }
-            NSWorkspace.shared.open(url)
-        }
+        // Over its own tab only, as a page's own questions are (see ask).
+        ask(from: webView, show: {
+            let alert = NSAlert()
+            alert.messageText = "Open \u{201C}\(name)\u{201D}?"
+            alert.informativeText = "\(webView.url?.host() ?? "This page") wants to open \(name)."
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            Dialogs.show(alert, over: webView) { answer in
+                guard answer == .alertFirstButtonReturn else { return }
+                NSWorkspace.shared.open(url)
+            }
+        }, drop: {})
     }
 
     /// A link that asks for a new window gets a new tab. The configuration

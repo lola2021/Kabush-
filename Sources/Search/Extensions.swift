@@ -426,7 +426,9 @@ final class Extensions: NSObject, ObservableObject {
                 context.setPermissionStatus(.grantedExplicitly, for: permission)
             }
             context.setPermissionStatus(.grantedExplicitly, for: .nativeMessaging)
-            for pattern in found.allRequestedMatchPatterns {
+            // Never one for extension pages, another's or all of them (see
+            // `fence`).
+            for pattern in found.allRequestedMatchPatterns where !Extensions.reachesExtensions(pattern) {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
             // Its own sign-in address, https://<id>.chromiumapp.org, which
@@ -438,15 +440,7 @@ final class Extensions: NSObject, ObservableObject {
                let own = try? WKWebExtension.MatchPattern(string: "https://\(item.id).chromiumapp.org/*") {
                 context.setPermissionStatus(.grantedExplicitly, for: own)
             }
-            // Other extensions' pages are never among "all sites": with
-            // chrome-extension registered as a scheme, WebKit counts them in
-            // <all_urls>, which Chrome doesn't. Refused outright, which WebKit
-            // puts before any grant; its own pages stay its own.
-            for scheme in Set([Extensions.scheme, Extensions.formerScheme, "webkit-extension"]) {
-                if let pages = try? WKWebExtension.MatchPattern(string: "\(scheme)://*/*") {
-                    context.setPermissionStatus(.deniedExplicitly, for: pages)
-                }
-            }
+            Extensions.fence(context)
             try controller.load(context)
             watch(context)
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
@@ -886,6 +880,38 @@ final class Extensions: NSObject, ObservableObject {
         return out.sorted()
     }
 
+    /// Extension pages, as a pattern names them: another extension's
+    /// (chrome-extension://<its id>/*) or every one's. No extension is ever
+    /// given them — not from its manifest, not asked for later — whatever
+    /// the question said; its own pages are its own without asking.
+    nonisolated static func reachesExtensions(_ pattern: WKWebExtension.MatchPattern) -> Bool {
+        guard let scheme = pattern.scheme?.lowercased() else { return false }
+        return [Extensions.scheme, Extensions.formerScheme, "webkit-extension"].contains(scheme)
+    }
+
+    /// Other extensions' pages are never among "all sites" either: with
+    /// chrome-extension registered as a scheme, WebKit counts them in
+    /// <all_urls>, which Chrome doesn't, so they are refused outright. A
+    /// refusal for all hosts doesn't outweigh a grant naming one — WebKit
+    /// looks at those first — which is why none is ever made (see
+    /// `reachesExtensions`). Set again after anything is granted.
+    static func fence(_ context: WKWebExtensionContext) {
+        for scheme in Set([Extensions.scheme, Extensions.formerScheme, "webkit-extension"]) {
+            if let pages = try? WKWebExtension.MatchPattern(string: "\(scheme)://*/*") {
+                context.setPermissionStatus(.deniedExplicitly, for: pages)
+            }
+        }
+    }
+
+    /// Whether this address is a page of an extension other than the one
+    /// asking — which it never gets to see into.
+    static func othersPage(_ url: URL?, for context: WKWebExtensionContext) -> Bool {
+        guard let url, let scheme = url.scheme?.lowercased(),
+              [Extensions.scheme, Extensions.formerScheme, "webkit-extension"].contains(scheme)
+        else { return false }
+        return url.host()?.lowercased() != context.uniqueIdentifier.lowercased()
+    }
+
     /// Chrome's own APIs, which Search answers itself, and what each lets an
     /// extension do.
     static let searchAnswered: [(String, String)] = [
@@ -1163,9 +1189,15 @@ extension Extensions: WKWebExtensionControllerDelegate {
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, promptForPermissionMatchPatterns matchPatterns: Set<WKWebExtension.MatchPattern>, in tab: (any WKWebExtensionTab)?, for extensionContext: WKWebExtensionContext) async -> (Set<WKWebExtension.MatchPattern>, Date?) {
-        let all = matchPatterns.contains { $0.matchesAllHosts || $0.matchesAllURLs }
-        let what = all ? "every website" : matchPatterns.map(\.string).sorted().joined(separator: ", ")
-        return await ask("wants to read and change \(what)", detail: "Until you remove the extension.", context: extensionContext) ? (matchPatterns, nil) : ([], nil)
+        // Extension pages are never given, so never asked about.
+        let wanted = matchPatterns.filter { !Extensions.reachesExtensions($0) }
+        guard !wanted.isEmpty else { return ([], nil) }
+        let all = wanted.contains { $0.matchesAllHosts || $0.matchesAllURLs }
+        let what = all ? "every website" : wanted.map(\.string).sorted().joined(separator: ", ")
+        guard await ask("wants to read and change \(what)", detail: "Until you remove the extension.", context: extensionContext) else { return ([], nil) }
+        // Given only once this returns: fenced again right after.
+        DispatchQueue.main.async { Extensions.fence(extensionContext) }
+        return (wanted, nil)
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, didUpdate action: WKWebExtension.Action, forExtensionContext context: WKWebExtensionContext) {
@@ -1243,9 +1275,16 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
         return owner.visibleTabs(of: browser).firstIndex { $0.id == tab.id } ?? NSNotFound
     }
 
-    func webView(for context: WKWebExtensionContext) -> WKWebView? { tab?.built }
+    /// A tab showing another extension's page gives an extension nothing of
+    /// it: no view to run a script in, no address, no picture — whatever it
+    /// was granted (see Extensions.reachesExtensions).
+    private func sealed(_ context: WKWebExtensionContext) -> Bool {
+        Extensions.othersPage(tab?.built?.url, for: context) || Extensions.othersPage(tab?.address, for: context)
+    }
+
+    func webView(for context: WKWebExtensionContext) -> WKWebView? { sealed(context) ? nil : tab?.built }
     func title(for context: WKWebExtensionContext) -> String? { tab?.title }
-    func url(for context: WKWebExtensionContext) -> URL? { tab?.address }
+    func url(for context: WKWebExtensionContext) -> URL? { sealed(context) ? nil : tab?.address }
     func isLoadingComplete(for context: WKWebExtensionContext) -> Bool { !(tab?.loading ?? false) }
     func isSelected(for context: WKWebExtensionContext) -> Bool { tab?.id == browser?.activeID }
     func isPinned(for context: WKWebExtensionContext) -> Bool { tab?.pin != nil }
@@ -1295,7 +1334,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     }
 
     func takeSnapshot(using configuration: WKSnapshotConfiguration, for context: WKWebExtensionContext) async throws -> NSImage? {
-        guard let web = tab?.built else { return nil }
+        guard let web = tab?.built, !sealed(context) else { return nil }
         return try await web.takeSnapshot(configuration: configuration)
     }
 }
