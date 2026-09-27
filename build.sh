@@ -89,14 +89,16 @@ ICONNAME=""
 ICONCAR="build/AppIcon.car"
 rm -rf "$ICONCAR"
 mkdir -p "$ICONCAR"
-if xcrun actool "$ICONDOC" --compile "$ICONCAR" --platform macosx \
+# Full paths: actool hands the document to a helper that runs elsewhere, and
+# with "build/…" it finds nothing ("Icon export exited with status 255").
+if xcrun actool "$PWD/$ICONDOC" --compile "$PWD/$ICONCAR" --platform macosx \
      --minimum-deployment-target "$MINIMUM" --app-icon AppIcon \
-     --output-partial-info-plist "$ICONCAR/partial.plist" > /dev/null 2>&1 \
+     --output-partial-info-plist "$PWD/$ICONCAR/partial.plist" > /dev/null 2>&1 \
    && [ -f "$ICONCAR/Assets.car" ]; then
   cp "$ICONCAR/Assets.car" "$APP/Contents/Resources/Assets.car"
   ICONNAME="<key>CFBundleIconName</key><string>AppIcon</string>"
 else
-  echo "note: no actool from Xcode 26 — the icon has no Dark or Tinted style this time" >&2
+  echo "note: actool from Xcode 26 didn't compile the icon — no Dark or Tinted style this time" >&2
 fi
 rm -rf "$ICONCAR" "$ICONDOC"
 
