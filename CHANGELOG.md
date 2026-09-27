@@ -15,6 +15,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 - Links from other apps can open in a small window of their own: the page, the site and Open in Search (⌘O), which moves it into your tabs as it is, after the pins and without loading it again. Escape or ⌘W closes it. Off unless you turn it on in Settings › General › Open links from other apps in a small window. The idea came from [@K-NRS](https://github.com/K-NRS) ([#227](https://github.com/driceroland/Search/pull/227)), after Arc's Little Arc.
 - ⌥⌘R reloads the page from origin, as Safari's Reload Page From Origin does, checking everything cached with the site again; ⌘R is now an ordinary reload, where it always went back to the site for everything, and ⇧⌘R stays Reading Mode. A page reloaded while in Reading Mode is no longer taken for one, so ⇧⌘R strips it down again instead of only reloading. Thanks [@ductan2](https://github.com/ductan2) ([#179](https://github.com/driceroland/Search/pull/179), [#171](https://github.com/driceroland/Search/issues/171))
+- ⇧⌘⌫, or History › Clear Browsing Data…, opens History at its clearing controls, from a page too, as in Chrome. It deletes nothing by itself: history, cookies and sign-ins, and the cache each still wait for their own button. Thanks [@siiddhantt](https://github.com/siiddhantt) ([#344](https://github.com/driceroland/Search/pull/344), [#336](https://github.com/driceroland/Search/issues/336))
 
 ### Fixed
 
