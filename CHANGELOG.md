@@ -115,6 +115,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Bringing things over from a damaged Firefox or Zen profile ends with a message rather than closing Search, and a folder or ZIP is read only as deep as Safari's own export goes.
 - ⌘F puts the keyboard in the find field every time, where with the Mac's keyboard navigation on it could land on the back button until ⌘F was pressed again, and closing the find bar hands the keyboard back to the page. ([#172](https://github.com/driceroland/Search/issues/172))
 - Search's icon reads in the Dock's Dark, Clear and Tinted styles on macOS 26, where it came out black on black: Dark shows the mark in white on a dark plate, and Tinted and Clear tint or frost a white one. The light icon is the one it was. Thanks [@KPR23](https://github.com/KPR23) for the report ([#337](https://github.com/driceroland/Search/issues/337))
+- The ad blocker no longer leaves empty boxes where the ads were: the slots news sites keep open for an ad, such as the banner at the top of AS, El País, The Guardian or CNN, now fold away with the ad, so the page closes up around them. Only well-known ad slots are hidden, and only while the blocker is on for the site ([#159](https://github.com/driceroland/Search/issues/159))
 
 ## 1.0.3 — 24 September 2026
 
