@@ -32,6 +32,9 @@ enum WhatsNew {
     /// Every switch worth meeting, oldest last. The card shows this
     /// version's, and the older ones still off.
     static let toggles: [Toggle] = [
+        Toggle(title: "AI on pages", detail: "Summarize a page or ask about it. Choose where it runs in Settings › AI.",
+               since: "1.0.5", get: { $0.ai }, set: { $0.ai = $1 }),
+
         Toggle(title: "Tab groups", detail: "Named sections of tabs. Right-click a tab to start one.",
                since: "1.0.4", get: { $0.usesTabGroups }, set: { $0.usesTabGroups = $1 }),
         Toggle(title: "Sidebar on the right", detail: "The tabs down the right edge of the window.",

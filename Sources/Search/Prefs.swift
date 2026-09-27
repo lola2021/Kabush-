@@ -284,6 +284,29 @@ final class Preferences: ObservableObject {
     @Published var usesTabGroups: Bool {
         didSet { store.set(usesTabGroups, forKey: "tabs.groups") }
     }
+    /// The AI add-on: summaries of the page and questions about it (see
+    /// AIAssist). Off unless asked for; nothing is sent until you ask.
+    @Published var ai: Bool {
+        didSet { store.set(ai, forKey: "ai") }
+    }
+    /// Where its answers come from. None until you choose.
+    @Published var aiProvider: AIProvider? {
+        didSet { store.set(aiProvider?.rawValue, forKey: "ai.provider") }
+    }
+    /// The model asked for at each provider, where it isn't the default.
+    @Published private(set) var aiModels: [String: String] {
+        didSet { store.set(aiModels, forKey: "ai.models") }
+    }
+
+    func aiModel(for provider: AIProvider) -> String {
+        let chosen = (aiModels[provider.rawValue] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return chosen.isEmpty ? provider.defaultModel : chosen
+    }
+
+    func setAIModel(_ model: String, for provider: AIProvider) {
+        aiModels[provider.rawValue] = String(model.prefix(120))
+    }
+
     /// Two pages share one place in the tab row. Off unless asked for.
     @Published var splitView: Bool {
         didSet { store.set(splitView, forKey: "splitView") }
@@ -367,6 +390,9 @@ final class Preferences: ObservableObject {
         usesSpaces = store.bool(forKey: "spaces")
         usesTabGroups = store.bool(forKey: "tabs.groups")
         splitView = store.bool(forKey: "splitView")
+        ai = store.bool(forKey: "ai")
+        aiProvider = store.string(forKey: "ai.provider").flatMap(AIProvider.init(rawValue:))
+        aiModels = store.dictionary(forKey: "ai.models") as? [String: String] ?? [:]
         commandBar = store.bool(forKey: "commandbar")
         let history = store.bool(forKey: "swipe.history")
         holdsHistory = history

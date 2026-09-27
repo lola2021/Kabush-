@@ -1162,6 +1162,55 @@ final class Bench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     answer(["kept": AIKeys.hint(for: .openRouter) ?? "", "waiting": AISignIn.waiting, "tabs": browser.tabs.count])
                 }
+            case "use":
+                // The add-on on, answered by this provider (and model).
+                guard let provider = (request["provider"] as? String).flatMap(AIProvider.init(rawValue:)) else {
+                    answer(["error": "ai use PROVIDER [MODEL]"]); return
+                }
+                browser.prefs.ai = true
+                browser.prefs.aiProvider = provider
+                if let model = request["model"] as? String { browser.prefs.setAIModel(model, for: provider) }
+                answer(["provider": provider.rawValue, "model": browser.prefs.aiModel(for: provider)])
+            case "summarize", "question":
+                // The menu's Summarize Page or Ask About This Page… on a tab,
+                // then — for a question — the question typed and sent.
+                guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+                browser.select(tab)
+                if request["action"] as? String == "summarize" { browser.summarizePage() } else { browser.askAboutPage() }
+                if let text = request["text"] as? String {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        browser.assisting?.draft = text
+                        browser.assisting?.submit()
+                    }
+                }
+                answer(["open": browser.assisting != nil])
+            case "agree":
+                browser.assisting?.agree()
+                answer(["open": browser.assisting != nil])
+            case "state":
+                guard let assistant = browser.assisting else { answer(["open": false]); return }
+                answer([
+                    "open": true, "reading": assistant.reading, "notice": assistant.notice ?? "", "trouble": assistant.trouble ?? "",
+                    "place": assistant.place,
+                    "turns": assistant.turns.map { ["question": $0.question ?? "", "answer": $0.answer, "done": $0.done,
+                                                     "failed": $0.failed ?? "", "strays": $0.strays] as [String: Any] },
+                ])
+            case "picture":
+                // The panel as it stands, and Settings › AI, drawn off screen
+                // to PNGs — no window.
+                guard let path = request["path"] as? String else { answer(["error": "ai picture PATH"]); return }
+                var made: [String] = []
+                func draw<V: View>(_ view: V, _ file: String) {
+                    let renderer = ImageRenderer(content: view.padding(20).background(Palette.wash))
+                    renderer.scale = 2
+                    guard let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                          let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) else { return }
+                    let url = URL(fileURLWithPath: path).appendingPathComponent(file)
+                    if (try? png.write(to: url)) != nil { made.append(url.path) }
+                }
+                if let assistant = browser.assisting { draw(AssistantPanel(browser: browser, assistant: assistant, drawn: true), "ai-panel.png") }
+                draw(AISettings(browser: browser, prefs: browser.prefs, drawn: true).frame(width: 440), "ai-settings.png")
+                answer(["made": made])
             case "read":
                 // What of the page would go to the model, and nothing sent.
                 guard let tab = find(request, in: browser) else { answer(missing(request)); return }

@@ -15,6 +15,7 @@ struct ShortcutsPage: View {
     private func shown(_ command: Command) -> Bool {
         // Split View's commands only once it is on.
         if Command.split.contains(command.id), !browser.prefs.splitView { return false }
+        if Command.ai.contains(command.id), !browser.prefs.ai { return false }
         let words = hunt.trimmingCharacters(in: .whitespaces)
         guard !words.isEmpty else { return true }
         let key = store.key(for: command.id)?.display ?? ""

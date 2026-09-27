@@ -167,6 +167,8 @@ struct Command: Identifiable {
         Command("view.reloadOrigin", "Reload Page From Origin", .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", "Reading Mode", .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
         Command("view.float", "Float Video", .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
+        Command("view.summarize", "Summarize Page", .view, nil) { $0.summarizePage() },
+        Command("view.ask", "Ask About This Page…", .view, nil) { $0.askAboutPage() },
         Command("view.hide", "Hide Elements…", .view, KeyCombo("h", shift: true)) { $0.toggleHiding() },
         Command("view.hidden", "Hidden on This Site…", .view, KeyCombo("u", shift: true)) { $0.reviewing.toggle() },
         Command("view.zoomIn", "Zoom In", .view, KeyCombo("+")) { $0.zoom(by: 1.1) },
@@ -417,4 +419,6 @@ extension Command {
     /// Split View's commands: with it off, not listed, and their keys go on
     /// to the page.
     static let split: Set<String> = ["tabs.split", "tabs.focusOtherPane", "tabs.separateSplit"]
+    /// The AI add-on's: with it off, not listed.
+    static let ai: Set<String> = ["view.summarize", "view.ask"]
 }

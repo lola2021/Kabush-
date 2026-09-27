@@ -209,6 +209,32 @@ final class AIClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
         return key
     }
 
+    /// The models an app on this Mac has, asked only when Settings shows
+    /// them. Ollama's "cloud" models, which it runs on ollama.com, are left
+    /// out: nothing chosen here leaves this Mac.
+    func localModels(_ provider: AIProvider) async -> [String] {
+        guard provider.isLocal else { return [] }
+        let url = provider == .ollama
+            ? provider.base.deletingLastPathComponent().appendingPathComponent("api/tags")
+            : provider.base.appendingPathComponent("models")
+        guard Self.allowed(url, for: provider) else { return [] }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        guard let (data, response) = try? await session.data(for: request, delegate: self),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        if provider == .ollama {
+            return (json["models"] as? [[String: Any]] ?? []).compactMap { model in
+                guard let name = model["name"] as? String, model["remote_host"] == nil, model["remote_model"] == nil,
+                      !name.hasSuffix("-cloud"), !name.contains(":cloud"), !name.contains("-cloud:")
+                else { return nil }
+                return name
+            }
+        }
+        return (json["data"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+    }
+
     // MARK: - reading
 
     /// The text in one event, for each way of writing.
