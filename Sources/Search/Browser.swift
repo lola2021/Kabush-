@@ -314,8 +314,8 @@ final class Browser: NSObject, ObservableObject {
         // The tab may have gone somewhere else while the list was up: a
         // redirect, a script. What was offered for one site is never put
         // into another's page.
-        guard curtain.host(of: tab.address) == list.host,
-              (tab.address?.scheme?.lowercased() == "http") == list.clear
+        guard curtain.host(of: tab.pageAddress) == list.host,
+              (tab.pageAddress?.scheme?.lowercased() == "http") == list.clear
         else { return }
         pickedInto = tab.id
         tab.fill(user: login.user, password: login.password) { [weak self] worked in
@@ -1607,13 +1607,13 @@ final class Browser: NSObject, ObservableObject {
             }
             lowering?.cancel()
             guard prefs.fillsPasswords, tab.id == activeID, pickedInto != tab.id,
-                  let host = curtain.host(of: tab.address)
+                  let host = curtain.host(of: tab.pageAddress)
             else { return }
             // A page that came over plain http can have been written by
             // anyone on the way here — a café's network, a hotel's. It is
             // offered only what was kept from plain http too, never an
             // account kept from the https site of the same name.
-            let inTheClear = tab.address?.scheme?.lowercased() == "http"
+            let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
             let known = Array(Vault.logins(matching: host).filter { !inTheClear || $0.clear }.prefix(5))
             suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known, host: host, clear: inTheClear)
         }
@@ -2159,6 +2159,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
+        tab.didCommit()
         if tab.id == activeID { linkStatus.dismiss() }
         tab.failure = nil
         tab.typing = false

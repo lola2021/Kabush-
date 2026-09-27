@@ -1432,6 +1432,7 @@ final class Bench {
         [
             "id": Bench.short(tab),
             "url": tab.address?.absoluteString ?? "",
+            "page": tab.pageAddress?.absoluteString ?? "",
             "title": tab.title,
             "name": tab.name ?? "",
             "loading": tab.loading,
