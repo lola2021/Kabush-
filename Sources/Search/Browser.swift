@@ -1948,8 +1948,11 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - tabs
 
+    /// A pin keeps its place among the pins, in every window (see Pins.swift),
+    /// so it stays out of a pair: unpinned first, by hand, it can go in.
     func canSplit(_ first: Tab, with second: Tab) -> Bool {
         prefs.splitView && first.id != second.id && !first.bench && !second.bench
+            && first.pin == nil && second.pin == nil
             && first.shy == second.shy
             && tabs.contains(where: { $0.id == first.id })
             && tabs.contains(where: { $0.id == second.id })
@@ -1960,8 +1963,6 @@ final class Browser: NSObject, ObservableObject {
         if floating == dragged.id || floating == target.id { land() }
         detachSplit(dragged)
         detachSplit(target)
-        if dragged.pin != nil { unpin(dragged) }
-        if target.pin != nil { unpin(target) }
         let oldGroup = dragged.groupID
         dragged.groupID = target.groupID
         var row = tabs.filter { $0.id != dragged.id }
@@ -1985,8 +1986,11 @@ final class Browser: NSObject, ObservableObject {
             if let right = tabs.first(where: { $0.id == pair.right }) { focusPane(right) }
             return
         }
+        guard current.pin == nil else {
+            announce("Unpin the tab to split it")
+            return
+        }
         if floating == current.id { land() }
-        if current.pin != nil { unpin(current) }
         let right = Tab(shy: current.shy,
                         configuration: current.shy ? Web.configuration(shy: true, store: current.store)
                             : Web.configuration(space: spaceID))
@@ -2008,9 +2012,13 @@ final class Browser: NSObject, ObservableObject {
         rememberSession()
     }
 
+    /// Once a drag of the divider is over, or once an arrow key moved it:
+    /// the drag itself is followed by the stage alone (see BrowserStage).
     func setSplitFraction(_ id: UUID, fraction: Double) {
         guard fraction.isFinite, let index = splits.firstIndex(where: { $0.id == id }) else { return }
-        splits[index].fraction = min(0.8, max(0.2, fraction))
+        let fraction = min(0.8, max(0.2, fraction))
+        guard splits[index].fraction != fraction else { return }
+        splits[index].fraction = fraction
         rememberSession()
     }
 
@@ -2505,9 +2513,14 @@ final class Browser: NSObject, ObservableObject {
               id == nil || tabGroups.contains(where: { $0.id == id }) else { return }
         let previousGroup = tab.groupID
         guard previousGroup != id else { return }
-        // A pair belongs to one section. Moving one side deliberately separates it.
-        detachSplit(tab)
+        // A pair is one place in the row: moved into a group or out of one,
+        // both halves go, and stay a pair. Dragged apart in the row, one
+        // half leaves on its own (see dropTabIntoStrip).
+        let partner = split(for: tab).flatMap { pair in
+            tabs.first { $0.id == (pair.left == tab.id ? pair.right : pair.left) }
+        }
         tab.groupID = id
+        partner?.groupID = id
         removeEmptyGroup(previousGroup)
         arrangeGroupedTabs()
         if let id, let index = tabGroups.firstIndex(where: { $0.id == id }) {
