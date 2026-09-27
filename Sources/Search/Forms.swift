@@ -248,8 +248,15 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       setTimeout(tell, 2200);
       // The boxes going away without a new page — a sign-in done in place —
       // is the other way a sign-in shows it took.
-      var settling = null;
-      new MutationObserver(function () {
+      //
+      // Looked at a quarter of a second after the page changes, not at every
+      // change: a chat writing out its answer changes the page on every word,
+      // and looking for the boxes each time — through the whole page — made
+      // a long conversation slower with every word it wrote (3,000 words:
+      // 0.3 s without this, up to 3.7 s with it, and climbing).
+      var settling = null, looking = null;
+      function look() {
+        looking = null;
         if (!told) { tell(); return; }
         if (pair()) return;
         told = false;
@@ -258,6 +265,9 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           if (pair()) return;
           window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
         }, 400);
+      }
+      new MutationObserver(function () {
+        if (!looking) looking = setTimeout(look, 250);
       }).observe(document.documentElement, { childList: true, subtree: true });
 
       // Whether the caret is somewhere on the page that takes typing.
