@@ -3382,7 +3382,6 @@ enum ExtensionShims {
             guard tabs.allSatisfy({ $0.pin == nil && !$0.shy }) else {
                 throw Unsupported(what: "Pinned and private tabs can't be grouped")
             }
-            let left = Set(tabs.compactMap { browser.group(of: $0) })
             let target: UUID
             if let number = args.dropFirst().first as? Int, number != -1 {
                 target = try listedGroup(number, in: browser).id
@@ -3392,15 +3391,12 @@ enum ExtensionShims {
                 browser.editingGroupID = nil
             }
             for tab in tabs { browser.move(tab, toGroup: target) }
-            browser.dropEmptyGroups(left)
             return TabGroup.number(target)
         case "tabs.ungroup":
             guard browser.prefs.usesTabGroups else { return nil }
             let visible = owner.visibleTabs
             let tabs = ((first as? [Int]) ?? []).compactMap { visible.indices.contains($0) ? visible[$0] : nil }
-            let left = Set(tabs.compactMap { browser.group(of: $0) })
             for tab in tabs { browser.move(tab, toGroup: nil) }
-            browser.dropEmptyGroups(left)
             return nil
 
         // MARK: identity

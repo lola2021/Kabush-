@@ -261,9 +261,10 @@ struct SideBar: View {
         let pinBlock = pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
         let count = prefs.usesTabGroups
-            ? browser.tabs(in: nil).count + browser.tabGroups.reduce(0) { $0 + 1 + browser.visibleTabs(in: $1).count }
+            ? browser.tabs(in: nil).count + browser.tabGroups.reduce(0) { $0 + browser.visibleTabs(in: $1).count }
             : browser.tabs.count - pins
-        let loose = CGFloat(count) * (SideBar.row + SideBar.gap)
+        let headings = prefs.usesTabGroups ? CGFloat(browser.tabGroups.count) * (GroupHeading.height + SideBar.gap) : 0
+        let loose = CGFloat(count) * (SideBar.row + SideBar.gap) + headings
         return Metrics.strip + pinBlock + loose + SideBar.row + 8
     }
 
@@ -405,9 +406,7 @@ struct SideBar: View {
             if prefs.usesTabGroups {
                 ForEach(browser.tabGroups) { group in
                     GroupHeading(browser: browser, group: group, dragSpace: "rows")
-                    if !group.collapsed || browser.visibleTabs(in: group).count > 0 {
-                        groupRows(group)
-                    }
+                    groupRows(group)
                 }
             }
             // See the grid: the drag is measured in the column's space, not
@@ -476,9 +475,6 @@ struct SideBar: View {
     private var newTab: some View {
         Quiet(icon: "plus", title: "New tab", height: SideBar.row) { browser.newTab() }
             .padding(.top, SideBar.gap)
-            .contextMenu {
-                if prefs.usesTabGroups { Button("New Group") { browser.addTabGroup() } }
-            }
     }
 
     /// One small door at the bottom: the settings.
