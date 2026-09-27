@@ -27,6 +27,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A default page zoom for every site, in Settings › General › Page zoom: where every site starts, 100% unless you change it. ⌘+ and ⌘− are still remembered for each site, and ⌘0 goes back to the default. Thanks [@binaryfields](https://github.com/binaryfields) ([#355](https://github.com/driceroland/Search/pull/355)), and [@shashwataggarwal](https://github.com/shashwataggarwal) for the first take on it ([#177](https://github.com/driceroland/Search/pull/177))
 - Back, forward and reload can sit on the left, before the tabs, with the tabs across the top: Settings › Tabs › Back, forward and reload on the left. Off unless you turn it on. Thanks [@Guitaraholic](https://github.com/Guitaraholic) ([#298](https://github.com/driceroland/Search/pull/298))
 - Bringing things over works from Helium too: its bookmarks, history and passwords. Thanks [@bacecek](https://github.com/bacecek) ([#178](https://github.com/driceroland/Search/pull/178))
+- Bringing things over works from Comet too. Thanks [@gabrielemeksiz-ui](https://github.com/gabrielemeksiz-ui) ([#301](https://github.com/driceroland/Search/pull/301))
 
 ### Fixed
 

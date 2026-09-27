@@ -69,6 +69,7 @@ enum Chromium {
         Source(name: "Vivaldi", folder: "Vivaldi", service: "Vivaldi Safe Storage", account: "Vivaldi", app: "Vivaldi.app"),
         Source(name: "Chromium", folder: "Chromium", service: "Chromium Safe Storage", account: "Chromium", app: "Chromium.app"),
         Source(name: "Helium", folder: "net.imput.helium", service: "Helium Storage Key", account: "Helium", app: "Helium.app"),
+        Source(name: "Comet", folder: "Comet", service: "Comet Safe Storage", account: "Comet", app: "Comet.app"),
     ]
 
     /// Where browsers keep their data: ~/Library/Application Support. A test
