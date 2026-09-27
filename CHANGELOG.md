@@ -15,6 +15,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 - Extensions hear what their own background sends their pages. WebKit delivered none of those messages, so Bitwarden's passkey window stayed blank and its sync timed out; each is now passed on to the extension's pages as well. Thanks [@dttdrv](https://github.com/dttdrv) ([#383](https://github.com/driceroland/Search/pull/383), [#388](https://github.com/driceroland/Search/issues/388))
 - An extension's popup follows the width its page asks for, narrower as well as wider: Bitwarden set to narrow no longer leaves an empty strip down the popup's side. Thanks [@dttdrv](https://github.com/dttdrv) ([#384](https://github.com/driceroland/Search/pull/384))
+- Search no longer offers to save a password typed into an extension's own page, such as Bitwarden's unlock PIN. Thanks [@dttdrv](https://github.com/dttdrv) ([#385](https://github.com/driceroland/Search/pull/385))
 
 ## 1.0.4 — 27 September 2026
 
