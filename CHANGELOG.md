@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- A search in the address field's suggestions wears the search engine's own icon in place of the magnifying glass when this Mac already has it, from a visit to the site. Nothing is fetched for it; an engine whose icon isn't known keeps the glass. Thanks [@merttopuz](https://github.com/merttopuz) ([#364](https://github.com/driceroland/Search/pull/364))
 - Videos can wait for a click, as with Safari's Never Auto-Play: they don't start by themselves, even without sound. Off unless you turn it on in Settings › General › Videos wait for a click; tabs already open follow once closed and opened again, or after they've slept.
 - New tabs can open at the top of the sidebar, under the pinned ones, instead of the bottom — ⌘T's and links opened beside the page alike. Off unless you turn it on in Settings › Tabs › New tabs at the top.
 - Switching spaces, the space's name shows for a moment beside its icon, where the tabs are, rather than at the bottom of the window; with the tabs folded away it still shows at the bottom.
