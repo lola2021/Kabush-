@@ -122,6 +122,9 @@ enum Spaces {
         // And once more a moment later, for what its closing tabs were
         // still writing — the cache of the page on screen, for one.
         let store = store(for: id)
+        // The space's downloads would have kept its store, and asked with
+        // its cookies again: they go with it.
+        Browsers.acting.forgetDownloads(of: store)
         let everything = WKWebsiteDataStore.allWebsiteDataTypes()
         store.removeData(ofTypes: everything, modifiedSince: .distantPast) {}
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {

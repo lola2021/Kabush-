@@ -3655,7 +3655,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         navigationAction: WKNavigationAction,
         didBecome download: WKDownload
     ) {
-        keep(download)
+        keep(download, from: webView)
         dropEmpty(webView)
     }
 
@@ -3664,7 +3664,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         navigationResponse: WKNavigationResponse,
         didBecome download: WKDownload
     ) {
-        keep(download)
+        keep(download, from: webView)
         dropEmpty(webView)
     }
 
@@ -3690,13 +3690,137 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     /// Every download this window has going, heard from until it ends — and
     /// counted, so a tab still sending one to disk is never put to sleep.
-    func keep(_ download: WKDownload) {
+    func keep(
+        _ download: WKDownload,
+        from suppliedWebView: WKWebView? = nil,
+        continuing entry: FetchEntry? = nil,
+        operationID: UUID? = nil,
+        helper: WKWebView? = nil
+    ) {
+        let webView = suppliedWebView ?? download.webView
+        // Find privacy before publishing the entry. A private transfer is
+        // still tracked internally so its delegate and Finder progress clean
+        // up correctly, but it never enters the shared Downloads panel.
+        let isPrivate = entry == nil && webView.map {
+            !$0.configuration.websiteDataStore.isPersistent || anyTab(for: $0)?.shy == true
+        } == true
         download.delegate = self
-        downloading.append(download)
-        fetches.start(download)
-        // Noted now, while its page is still there to ask: a private tab's
-        // download is saved where you say, and left out of the list.
-        if let web = download.webView, tab(for: web)?.shy == true { unlisted.insert(ObjectIdentifier(download)) }
+        if !downloading.contains(where: { $0 === download }) { downloading.append(download) }
+        if isPrivate { unlisted.insert(ObjectIdentifier(download)) }
+        else { unlisted.remove(ObjectIdentifier(download)) }
+        guard fetches.start(
+            download,
+            owner: self,
+            webView: webView,
+            listed: !isPrivate,
+            entry: entry,
+            operationID: operationID,
+            helper: helper
+        ) else {
+            relinquish(download)
+            download.cancel { _ in }
+            return
+        }
+        // A true resume may continue the preserved target without asking its
+        // delegate for a destination again. Publish Finder progress as soon
+        // as the resumed WKDownload is attached; `going` coalesces a later
+        // destination callback for the same URL.
+        if entry != nil, let destination = entry?.destination {
+            fetches.going(download, to: destination, cancel: finderCancellation(for: download))
+        }
+    }
+
+    /// Pause an active download. WebKit's cancellation callback is the
+    /// authoritative source of resume data and also owns cleanup if no
+    /// delegate failure callback arrives.
+    func pauseDownload(_ entry: FetchEntry) {
+        guard entry.canPause, let operation = fetches.beginStop(entry, action: .pause) else { return }
+        stopDownload(operation)
+    }
+
+    func resumeDownload(_ entry: FetchEntry) {
+        guard let operation = fetches.beginResume(entry), let data = operation.resumeData else { return }
+        operation.webView.resumeDownload(fromResumeData: data) { download in
+            self.continueDownload(download, operation)
+        }
+    }
+
+    /// From the start, to the folder it went to, under the name it was asked
+    /// for: numbered afresh, " 2" and on, past whatever is there now, the
+    /// last attempt's half-written file let go first.
+    func retryDownload(_ entry: FetchEntry) {
+        let folder = entry.destination?.deletingLastPathComponent() ?? downloadsFolder
+        guard let operation = fetches.beginRetry(entry, destination: { Self.free(entry.retryName, in: folder) }),
+              let request = operation.request else { return }
+        operation.webView.startDownload(using: request) { download in
+            self.continueDownload(download, operation)
+        }
+    }
+
+    private func continueDownload(_ download: WKDownload, _ operation: Fetches.StartOperation) {
+        guard fetches.accepts(operation) else {
+            download.cancel { _ in }
+            return
+        }
+        keep(
+            download, from: operation.webView, continuing: operation.entry, operationID: operation.operationID,
+            helper: operation.helper ? operation.webView : nil
+        )
+    }
+
+    /// Active rows stop; paused and failed rows are removed and release their
+    /// in-memory resume data and the store they were asked with.
+    func cancelDownload(_ entry: FetchEntry) {
+        switch entry.state {
+        case .downloading:
+            guard let operation = fetches.beginStop(entry, action: .cancel) else { return }
+            stopDownload(operation)
+        case .pausing:
+            _ = fetches.upgradeStopToCancel(entry)
+        case .resuming:
+            fetches.removeStarting(entry)
+        case .paused, .failed:
+            fetches.removeStopped(entry)
+        }
+    }
+
+    /// A space deleted: its downloads go with it, whatever they were doing,
+    /// as Cancel or Remove would take them, and with them the store they
+    /// kept and any view made to ask with it. Its cookies can then be
+    /// erased, and nothing is asked with them again.
+    func forgetDownloads(of store: WKWebsiteDataStore) {
+        for entry in fetches.entries where entry.store === store { cancelDownload(entry) }
+    }
+
+    private func stopDownload(_ operation: Fetches.StopOperation) {
+        let fetches = self.fetches
+        operation.download.cancel { resumeData in
+            DispatchQueue.main.async {
+                guard let ended = fetches.stopped(operation, resumeData: resumeData) else { return }
+                ended.owner.relinquish(operation.download)
+            }
+        }
+    }
+
+    /// Called for both delegate completion and WKDownload.cancel completion;
+    /// idempotence handles WebKit choosing either callback order.
+    func relinquish(_ download: WKDownload) {
+        downloading.removeAll { $0 === download }
+        unlisted.remove(ObjectIdentifier(download))
+    }
+
+    private func finderCancelled(_ download: WKDownload) {
+        guard let operation = fetches.beginFinderStop(download) else { return }
+        stopDownload(operation)
+    }
+
+    private func finderCancellation(for download: WKDownload) -> @Sendable () -> Void {
+        { [weak self, weak download] in
+            DispatchQueue.main.async {
+                guard let self, let download else { return }
+                self.finderCancelled(download)
+            }
+        }
     }
 
     /// Without this WebKit refuses every request out of hand, and a page that
@@ -3926,19 +4050,35 @@ extension Browser: WKDownloadDelegate {
         completionHandler: @escaping (URL?) -> Void
     ) {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
-        let file = whereToSave(asked ?? suggestedFilename)
-        completionHandler(file)
-        if let file {
-            fetches.going(download, to: file)
-            announce("Downloading \(file.lastPathComponent)")
+        let chosen = fetches.destination(for: download)
+        let name = Browser.fileName(asked ?? suggestedFilename)
+        let file = chosen ?? whereToSave(name)
+        guard let file else {
+            if let ended = fetches.destinationCancelled(download) {
+                ended.owner.relinquish(download)
+            } else {
+                relinquish(download)
+            }
+            completionHandler(nil)
+            return
         }
+        fetches.going(download, to: file, cancel: finderCancellation(for: download))
+        // A retry is numbered afresh from the name asked for, or the one you
+        // gave it: never from "report 2.pdf", whose own " 2" is not its name.
+        if chosen == nil { fetches.entry(for: download)?.retryName = prefs.asksWhereToSave ? file.lastPathComponent : name }
+        completionHandler(file)
+        announce("Downloading \(file.lastPathComponent)")
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        downloading.removeAll { $0 === download }
-        fetches.finish(download, file: download.progress.fileURL)
-        let listed = unlisted.remove(ObjectIdentifier(download)) == nil
-        guard let file = download.progress.fileURL else {
+        let entry = fetches.entry(for: download)
+        let source = download.originalRequest?.url ?? entry?.request?.url
+        let file = download.progress.fileURL ?? entry?.destination
+        let listed = !unlisted.contains(ObjectIdentifier(download))
+        let ended = fetches.finish(download, file: file)
+        (ended?.owner ?? self).relinquish(download)
+        guard ended != nil else { return }
+        guard let file else {
             announce("Download finished")
             return
         }
@@ -3946,11 +4086,11 @@ extension Browser: WKDownloadDelegate {
             announce("Saved \(file.lastPathComponent)")
             return
         }
-        if #available(macOS 15.4, *), let asked = download.originalRequest?.url,
+        if #available(macOS 15.4, *), let asked = source,
            let id = ExtensionShims.askedDownloads.removeValue(forKey: asked) {
             ExtensionShims.ownDownloads[id, default: []].insert(file.path)
         }
-        saved(file, from: download.originalRequest?.url)
+        saved(file, from: source)
     }
 
     /// The download button in the bar WebKit draws over a PDF. WebKit has the
@@ -4011,8 +4151,7 @@ extension Browser: WKDownloadDelegate {
     /// comes from the page, so only its last part is taken: never a path
     /// out of the folder.
     private func whereToSave(_ name: String) -> URL? {
-        let last = (name as NSString).lastPathComponent
-        let name = ["", ".", "..", "/"].contains(last) ? "download" : last
+        let name = Browser.fileName(name)
         guard prefs.asksWhereToSave else { return Browser.free(name, in: downloadsFolder) }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
@@ -4020,6 +4159,11 @@ extension Browser: WKDownloadDelegate {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK else { return nil }
         return panel.url
+    }
+
+    private static func fileName(_ name: String) -> String {
+        let last = (name as NSString).lastPathComponent
+        return ["", ".", "..", "/"].contains(last) ? "download" : last
     }
 
     private func saved(_ file: URL, from source: URL?) {
@@ -4032,10 +4176,9 @@ extension Browser: WKDownloadDelegate {
         didFailWithError error: Error,
         resumeData: Data?
     ) {
-        downloading.removeAll { $0 === download }
-        unlisted.remove(ObjectIdentifier(download))
-        fetches.fail(download)
-        announce("Download failed")
+        guard let ended = fetches.fail(download, error: error, resumeData: resumeData) else { return }
+        ended.owner.relinquish(download)
+        if ended.announceFailure { announce("Download failed") }
     }
 
     /// WebKit refuses to write over a file that is already there, so the name
