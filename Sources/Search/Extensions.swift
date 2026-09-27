@@ -317,6 +317,15 @@ final class Extensions: NSObject, ObservableObject {
             for pattern in found.allRequestedMatchPatterns {
                 context.setPermissionStatus(.grantedExplicitly, for: pattern)
             }
+            // Its own sign-in address, https://<id>.chromiumapp.org, which
+            // is never loaded (see ExtensionAuth.handOver). WebKit shows an
+            // extension a tab's address only where it has access, where
+            // Chrome's "tabs" is enough, and one watching its sign-in tab
+            // for that address has to be able to see it.
+            if ExtensionShims.allowed(item.id, context: context).contains("identity"),
+               let own = try? WKWebExtension.MatchPattern(string: "https://\(item.id).chromiumapp.org/*") {
+                context.setPermissionStatus(.grantedExplicitly, for: own)
+            }
             // Other extensions' pages are never among "all sites": with
             // chrome-extension registered as a scheme, WebKit counts them in
             // <all_urls>, which Chrome doesn't. Refused outright, which WebKit

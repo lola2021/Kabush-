@@ -231,6 +231,27 @@ final class Tab: ObservableObject, Identifiable {
 
     func didCommit() {
         if let url = built?.url, url.absoluteString != "about:blank" { committed = url }
+        // A page arrived after all: the address is its own again.
+        if held != nil, let url = built?.url, url.absoluteString != "about:blank" {
+            held = nil
+            address = url
+        }
+    }
+
+    /// An address the tab shows, and reports to extensions, without loading
+    /// it (see ExtensionAuth.handOver). The page on screen stays. WebKit
+    /// going back to that page's address as the cancelled load unwinds is not
+    /// a move, so the observer below lets it pass. The page is WebKit's own
+    /// current item, not `committed`, which a same-site load in progress has
+    /// already moved on.
+    private(set) var held: URL?
+    private var heldOver: URL?
+
+    func hold(_ url: URL) {
+        held = url
+        heldOver = built?.backForwardList.currentItem?.url
+        address = url
+        failure = nil
     }
     @Published private(set) var progress: Double = 0
     @Published private(set) var loading = false
@@ -543,6 +564,10 @@ final class Tab: ObservableObject, Identifiable {
                     // a pinned tab lost the only thing that could bring it
                     // back, and vanished from the session altogether.
                     guard fresh.absoluteString != "about:blank" else { return }
+                    if self.held != nil {
+                        if fresh == self.heldOver { return }
+                        self.held = nil
+                    }
                     let moved = fresh.host() != self.address?.host()
                     self.address = fresh
                     // Within the same origin — history.pushState, a fragment —
@@ -811,6 +836,7 @@ final class Tab: ObservableObject, Identifiable {
         // stop being blank in the same frame the field disappears, or the empty
         // state flashes back for an instant on its way out.
         address = url
+        held = nil
         title = ""
         failure = nil
         reading = 0

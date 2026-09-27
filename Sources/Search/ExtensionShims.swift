@@ -2748,7 +2748,7 @@ enum ExtensionShims {
     /// courtesy to honest code, the shim runs beside the extension's own,
     /// so the one that counts is here. The manifest is the one WebKit
     /// already holds, not the file read again on every call.
-    private static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
+    static func allowed(_ id: String, context: WKWebExtensionContext) -> Set<String> {
         let asked = (context.webExtension.manifest["permissions"] as? [Any] ?? []).compactMap { $0 as? String }
         return Set(asked + (Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []))
     }
@@ -3661,6 +3661,33 @@ enum ExtensionAuth {
         // left behind, it would hold a redirect that never loads.
         if from.id != entry.tab { browser.close(from) }
         if let tab = browser.tabs.first(where: { $0.id == entry.tab }) { browser.close(tab) }
+        return true
+    }
+
+    /// The same redirect with no launchWebAuthFlow waiting for it. Some
+    /// extensions open the provider's page with tabs.create and watch that
+    /// tab's address until it reaches their chromiumapp.org one, then close
+    /// the tab (Figma's does). In Chrome the navigation fails onto an error
+    /// page that still carries the address, and tabs.onUpdated reports it;
+    /// in WebKit a failed load never commits, so nothing would. The tab takes
+    /// the address without loading anything, for an installed extension
+    /// that asked for identity. What each extension sees of it is WebKit's
+    /// call, as for any address: tabs or host access, as in Chrome. Left
+    /// open, the tab says what Chrome's would.
+    static func handOver(_ url: URL, mainFrame: Bool, browser: Browser, from webView: WKWebView) -> Bool {
+        guard mainFrame, url.scheme?.lowercased() == "https", let host = url.host()?.lowercased(),
+              host.hasSuffix(".chromiumapp.org") else { return false }
+        let id = String(host.dropLast(".chromiumapp.org".count))
+        guard #available(macOS 15.4, *), let context = Extensions.shared.contexts[id],
+              ExtensionShims.allowed(id, context: context).contains("identity"),
+              let tab = browser.tab(for: webView)
+        else { return false }
+        tab.hold(url)
+        Task { @MainActor [weak tab] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let tab, tab.held == url else { return }
+            tab.failure = "No site at that address."
+        }
         return true
     }
 }
