@@ -179,6 +179,15 @@ struct SettingsPanel: View {
                 }
             }
             Rule()
+            // Coming from another browser, now or any time later: the same
+            // sheet as File › Bring Things Over… and the Welcome's.
+            Line("Bring things over", "Bookmarks, history, passwords and extensions from another browser on this Mac, or from a file it exported") {
+                Pill("Bring Things Over…") {
+                    browser.tuning = false
+                    browser.bringingIn = ""
+                }
+            }
+            Rule()
             Line("Search with", searchDetail) {
                 Picker("", selection: $prefs.engine) {
                     ForEach(Engine.allCases) { engine in

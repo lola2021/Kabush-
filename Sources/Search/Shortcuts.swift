@@ -145,6 +145,7 @@ struct Command: Identifiable {
         Command("file.closeTab", "Close Tab", .file, KeyCombo("w")) { browser in
             if let tab = browser.active { browser.close(tab) }
         },
+        Command("file.import", "Bring Things Over…", .file, nil) { $0.bringingIn = "" },
         Command("file.share", "Share…", .file, nil) { $0.share() },
         Command("file.print", "Print…", .file, KeyCombo("p")) { $0.printPage() },
 

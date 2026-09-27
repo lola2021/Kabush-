@@ -62,6 +62,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Put to Sleep in a tab's right-click menu lets its page go now, as it would after half an hour unseen: the tab keeps its place, title and picture, and loads again when you go to it. Not for the tab on screen, or one that has to stay awake (a pin, sound playing, a call); with something typed on the page, Search says why it stays awake. Thanks [@Takuto1121-ja](https://github.com/Takuto1121-ja) for asking ([#310](https://github.com/driceroland/Search/issues/310))
 - ⌘Return keeps a peek as a tab, as its Open as a Tab button does; the keypad's Enter too. While you type in the peeked page, ⌘Return is left to it, to send a message. Thanks [@bhanni01](https://github.com/bhanni01) ([#326](https://github.com/driceroland/Search/pull/326))
 - Pins fill their rows evenly: at most four to a row, fewer only in a column too narrow for four, and the rows as even as they go, the fuller first — five are three and two, seven four and three, nine three rows of three, ten four, three and three. Each row shares the column's width between its own pins. Thanks [@Tenk1](https://github.com/Tenk1) for asking ([#240](https://github.com/driceroland/Search/issues/240))
+- File › Bring Things Over… opens the sheet for another browser's bookmarks, history, passwords and extensions, as Safari's File › Import From does, and so does Bring Things Over… in Settings › General: any time, not only at the first launch.
 
 ### Fixed
 

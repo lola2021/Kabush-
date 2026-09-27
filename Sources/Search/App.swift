@@ -49,6 +49,12 @@ struct SearchApp: App {
                 Button("Open Address…") { browser.edit() }
                     .shortcut("file.openAddress")
                 Divider()
+                // Another browser's bookmarks, history, passwords and the
+                // rest, as Safari's File › Import From: the one sheet every
+                // other way in opens too.
+                Button("Bring Things Over…") { browser.bringingIn = "" }
+                    .shortcut("file.import")
+                Divider()
                 Button("Close Tab") { if let tab = browser.active { browser.close(tab) } }
                     .shortcut("file.closeTab")
             }
