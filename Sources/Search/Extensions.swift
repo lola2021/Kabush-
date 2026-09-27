@@ -908,9 +908,20 @@ extension Extensions: WKWebExtensionControllerDelegate {
         window
     }
 
+    /// Where an extension may send a tab. Not to javascript:, which would run
+    /// its code in whatever page the tab shows — an extension with no access
+    /// to that site at all — nor to a file on this Mac. Chrome refuses both.
+    static func mayOpen(_ url: URL) throws {
+        let scheme = url.scheme?.lowercased() ?? ""
+        guard scheme != "javascript", scheme != "file" else {
+            throw NSError(domain: "Search", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot navigate to a \(scheme): URL."])
+        }
+    }
+
     func webExtensionController(_ controller: WKWebExtensionController, openNewTabUsing configuration: WKWebExtension.TabConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionTab)? {
         guard let browser else { return nil }
         let url = configuration.url ?? URL(string: "about:blank")!
+        try Extensions.mayOpen(url)
         let tab = browser.open(url, foreground: configuration.shouldBeActive, atEnd: true)
         if configuration.shouldBePinned { browser.pin(tab) }
         return adapter(for: tab)
@@ -919,6 +930,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
     /// One window, on purpose. A new window's pages become tabs in this one.
     func webExtensionController(_ controller: WKWebExtensionController, openNewWindowUsing configuration: WKWebExtension.WindowConfiguration, for extensionContext: WKWebExtensionContext) async throws -> (any WKWebExtensionWindow)? {
         guard let browser else { return nil }
+        for url in configuration.tabURLs { try Extensions.mayOpen(url) }
         for (index, url) in configuration.tabURLs.enumerated() {
             browser.open(url, foreground: index == 0 && configuration.shouldBeFocused, atEnd: true)
         }
@@ -1051,6 +1063,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
 
     func loadURL(_ url: URL, for context: WKWebExtensionContext) async throws {
         guard let tab else { return }
+        try Extensions.mayOpen(url)
         // A website's tab sent to one of an extension's own pages — 1Password
         // does, once a sign-in in its tab has added the account. The page
         // can only be served to a view built from that extension's
