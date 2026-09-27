@@ -1421,11 +1421,20 @@ final class Browser: NSObject, ObservableObject {
 
     /// A bookmark picked from the button's list or the full one. Either
     /// goes as the page starts: the list off the button used to stay open
-    /// over the page it had just sent you to.
-    func pickBookmark(_ url: URL) {
-        bookmarking = false
-        bookmarksOpen = false
-        visit(url)
+    /// over the page it had just sent you to. A middle-click opens it in a
+    /// new tab behind this one and leaves the list open for the next; with
+    /// ⇧ it goes to the new tab, and the list closes.
+    func pickBookmark(_ url: URL, inNewTab: Bool = false) {
+        let foreground = !inNewTab || NSApp.currentEvent?.modifierFlags.contains(.shift) == true
+        if foreground {
+            bookmarking = false
+            bookmarksOpen = false
+        }
+        if inNewTab {
+            open(url, foreground: foreground, from: active)
+        } else {
+            visit(url)
+        }
     }
 
     /// ⌘⇧N. A tab that keeps nothing — its own cookies, its own sign-ins, no
