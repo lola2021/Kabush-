@@ -79,6 +79,12 @@ import os
 import socket
 import sys
 
+def clean(text):
+    """A page chooses its title: nothing in it may move the terminal's cursor,
+    change its colours, or turn the line around."""
+    import re
+    return re.sub(r"[\x00-\x1f\x7f\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", str(text or ""))
+
 def folder(world):
     name = f"Search ({world})" if world else "Search"
     return os.path.expanduser(f"~/Library/Application Support/{name}")
@@ -295,7 +301,7 @@ def main(argv):
         for tab in answer.get("tabs", []):
             mark = "⚗" if tab.get("bench") else ("●" if tab.get("active") else " ")
             state = " …" if tab.get("loading") else (" z" if tab.get("asleep") else "")
-            print(f"{mark} {tab['id']}  {tab.get('title') or '—'}  {tab.get('url')}{state}")
+            print(f"{mark} {tab['id']}  {clean(tab.get('title')) or '—'}  {clean(tab.get('url'))}{state}")
     else:
         print(json.dumps(answer, ensure_ascii=False, indent=2))
     return 0

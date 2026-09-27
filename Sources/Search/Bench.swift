@@ -278,7 +278,9 @@ final class Bench {
 
         switch verb {
         case "tabs":
-            answer(["tabs": browser.tabs.map(describe)])
+            // A private tab is nobody's business but yours: a test run has none
+            // of yours, so there every tab is listed.
+            answer(["tabs": browser.tabs.filter { Store.testing || !$0.shy }.map(describe)])
 
         case "open":
             guard let url = (request["url"] as? String).flatMap(Address.url(from:)) else {
@@ -874,7 +876,7 @@ final class Bench {
         case "place":
             // A tab put at another place in the row, as a drag would.
             guard let id = request["id"] as? String, let to = request["to"] as? Int,
-                  let tab = browser.tabs.first(where: { Bench.short($0) == id })
+                  let tab = browser.tabs.first(where: { Bench.short($0) == id && (Store.testing || $0.bench) })
             else { answer(["error": "place needs a tab id and an index"]); return }
             browser.move(tab, to: to)
             answer(["at": browser.tabs.firstIndex { $0.id == tab.id } ?? -1])
@@ -1188,6 +1190,7 @@ final class Bench {
         case "site":
             // The site card for the tab on screen, or one step in on its
             // connection, drawn off screen (see SiteCard.swift).
+            guard Store.testing else { answer(["error": "site only works on a --test run — it would picture your tab"]); return }
             guard let path = request["path"] as? String else { answer(["error": "site needs a path"]); return }
             guard let tab = browser.active, !tab.isBlank else { answer(["error": "no page on screen"]); return }
             let deeper = request["security"] as? Bool == true
@@ -1212,6 +1215,7 @@ final class Bench {
         case "column":
             // The column of tabs, drawn off screen at its width, with what the
             // browser has now — the rows, the card for a new space, the dots.
+            guard Store.testing else { answer(["error": "column only works on a --test run — it would picture your tabs"]); return }
             guard let path = request["path"] as? String else { answer(["error": "column needs a path"]); return }
             let height = request["height"] as? Double ?? 600
             let width = Double(browser.prefs.sideWidth)
@@ -1298,7 +1302,7 @@ final class Bench {
             // Open or close the app's own panels, to reproduce what a person
             // did without a person.
             if let on = request["settings"] as? Bool { browser.tuning = on }
-            if let on = request["passwords"] as? Bool { browser.managing = on }
+            if let on = request["passwords"] as? Bool, Store.testing { browser.managing = on }
             if let on = request["welcome"] as? Bool { browser.welcoming = on }
             if let on = request["history"] as? Bool { browser.recalling = on }
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
