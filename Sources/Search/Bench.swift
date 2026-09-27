@@ -326,6 +326,13 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             browser.sleep(tab) { said in answer(["said": said, "asleep": tab.asleep]) }
 
+        case "pin":
+            // Pin a tab, or unpin it with "off". Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "pin only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            if request["off"] as? Bool == true { browser.unpin(tab) } else { browser.pin(tab) }
+            answer(["pin": tab.pin ?? "", "pinned": browser.pinnedCount])
+
         case "select":
             // Picking a tab takes the window over, which the bench never does
             // to someone using it: only on a SEARCH_PROBE run.
@@ -1438,7 +1445,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "fill", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "field", "bookmark", "menu", "keyeq", "fill", "pin", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }
