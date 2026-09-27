@@ -1341,6 +1341,18 @@ final class ExtensionWindow: NSObject, WKWebExtensionWindow {
     func close(for context: WKWebExtensionContext) async throws {
         browser?.window?.performClose(nil)
     }
+
+    /// windows.update with a position or size; unset parts come as NaN and
+    /// stay as they are, and the window never goes below its smallest size.
+    func setFrame(_ frame: CGRect, for context: WKWebExtensionContext) async throws {
+        guard let window = nsWindow else { return }
+        let now = window.frame
+        func or(_ value: CGFloat, _ current: CGFloat) -> CGFloat { value.isFinite ? value : current }
+        let size = NSSize(width: max(window.minSize.width, or(frame.size.width, now.width)),
+                          height: max(window.minSize.height, or(frame.size.height, now.height)))
+        let origin = NSPoint(x: or(frame.origin.x, now.origin.x), y: or(frame.origin.y, now.origin.y))
+        window.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+    }
 }
 
 // MARK: - the buttons in the row
