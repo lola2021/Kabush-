@@ -73,6 +73,8 @@
                                        the last closed one back (⇧⌘T), the Nth moved, the Nth as if in
                                        front, a link as another app hands it over; --window N before
                                        any command aims it at the Nth window
+    ./bench towindow ID N|new|drop X Y test run: a tab to the Nth window, a new one (Move to Window), or let
+                                       go at screen point X Y as a drag out of the row
     ./bench quit                       test run: quit the app as ⌘Q does
     ./bench middle ID X Y              test run: the middle button clicked at X Y of a tab's page
     ./bench pin ID [off|home]          test run: pin a tab, unpin it, or double-click it (home)
@@ -301,6 +303,11 @@ def main(argv):
     elif verb == "keyeq":
         if len(args) < 2 or any(a != "shift" for a in args[2:]): sys.exit("usage: bench keyeq CHARS CODE [shift]")
         request["chars"], request["code"], request["mods"] = args[0], int(args[1]), args[2:]
+    elif verb == "towindow":
+        if len(args) not in (2, 4) or (len(args) == 4 and args[1] != "drop"): sys.exit("usage: bench towindow ID N|new|drop X Y")
+        request["id"] = args[0]
+        if args[1] == "drop": request["at"] = [float(args[2]), float(args[3])]
+        elif args[1] != "new": request["to"] = int(args[1])
     elif verb == "windows":
         if not args: args = ["list"]
         if args[0] not in ("list", "new", "close", "reopen", "frame", "front", "link") or (args[0] in ("close", "frame", "front", "link") and len(args) < 2):

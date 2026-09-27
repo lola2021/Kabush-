@@ -428,7 +428,8 @@ struct SideBar: View {
                 // Positions here are among the loose rows; the pinned block
                 // sits in front of them in the real list.
                 .modifier(Carried(index: index, count: looseTabs.count, step: step, vertical: true,
-                                  space: "rows", onDrop: { point in drop(tab, at: point) }) {
+                                  space: "rows", onDrop: { point in drop(tab, at: point) },
+                                  outside: { browser.dragOut(tab) }) {
                     if prefs.usesTabGroups {
                         browser.move(tab, within: nil, to: $0)
                     } else {
@@ -458,7 +459,8 @@ struct SideBar: View {
                     .padding(.leading, 14)
                     .modifier(Carried(index: index, count: members.count,
                                       step: SideBar.row + SideBar.gap, vertical: true,
-                                      space: "rows", onDrop: { point in drop(tab, at: point) }) {
+                                      space: "rows", onDrop: { point in drop(tab, at: point) },
+                                      outside: { browser.dragOut(tab) }) {
                         browser.move(tab, within: group.id, to: $0)
                     })
             }

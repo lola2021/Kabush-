@@ -439,6 +439,23 @@ final class Bench {
                 }
             }
 
+        case "towindow":
+            // A tab to another window, as its menu's Move to Window does: to
+            // the Nth, or a new one. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "towindow only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            if let at = request["at"] as? [Double], at.count == 2 {
+                // Let go at a point of the screen, as a drag out of the row.
+                let taken = browser.dragOut(tab, at: NSPoint(x: at[0], y: at[1]))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(["taken": taken, "windows": Browsers.all.count]) }
+                return
+            }
+            let n = request["to"] as? Int
+            let target = n.flatMap { Browsers.all.indices.contains($0 - 1) ? Browsers.all[$0 - 1] : nil }
+            if n != nil, target == nil { answer(["error": "no window \(n ?? 0)"]); return }
+            browser.moveToWindow(tab, target)
+            answer(["windows": Browsers.all.count])
+
         case "quit":
             // ⌘Q, on a test run: the app ends the way it does for you, the
             // session and windows.json written on the way out.
@@ -1587,7 +1604,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }

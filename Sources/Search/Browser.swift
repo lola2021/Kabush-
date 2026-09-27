@@ -1767,6 +1767,82 @@ final class Browser: NSObject, ObservableObject {
         return true
     }
 
+    // MARK: - a tab to another window
+
+    /// The tab's menu: Move to New Window, or to another window. The tab
+    /// goes as it is, page and all, into the other window's row after the
+    /// tab it's on, in front there; into a space with other sign-ins it
+    /// reopens with those, as Move to Space does. Not a pin: pins are
+    /// already in every window.
+    func moveToWindow(_ tab: Tab, _ target: Browser?, at point: NSPoint? = nil) {
+        guard tab.pin == nil, !tab.bench, target !== self, tabs.contains(where: { $0.id == tab.id }),
+              target != nil || tabs.count > 1 || !tab.isBlank
+        else { return }
+        let destination = target ?? Browser(record: WindowRecord(space: spaceID))
+        detach(tab)
+        destination.receive(tab)
+        if target == nil {
+            // Dragged out: the new window where the tab was let go, its row
+            // under the hand.
+            let frame = point.map { p -> NSRect in
+                let size = window?.frame.size ?? NSSize(width: 1180, height: 780)
+                return NSRect(x: p.x - 120, y: p.y - size.height + 20, width: size.width, height: size.height)
+            }
+            Browsers.open(destination, frame: frame)
+        } else {
+            destination.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    /// A tab dragged out of the row and let go outside this window: into
+    /// the window it was let go over, or a new one there, as in Chrome and
+    /// Safari. False when it was let go over this window, where the drag
+    /// keeps its meaning, or can't leave (a pin).
+    func dragOut(_ tab: Tab, at point: NSPoint = NSEvent.mouseLocation) -> Bool {
+        guard tab.pin == nil, !tab.bench, let window,
+              !window.frame.insetBy(dx: -12, dy: -12).contains(point)
+        else { return false }
+        let over = Browsers.all.first { $0 !== self && $0.isOpen && $0.window?.frame.contains(point) == true }
+        guard over != nil || tabs.count > 1 else { return false }
+        // After the drag has let go, not inside it.
+        DispatchQueue.main.async { [weak self] in self?.moveToWindow(tab, over, at: point) }
+        return true
+    }
+
+    /// Out of this row, not closed: it is on its way to another window.
+    private func detach(_ tab: Tab) {
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if floating == tab.id { land() }
+        if editingTab == tab.id { cancelTabEdit() }
+        if activeID == tab.id {
+            if tabs.count > 1 {
+                select(tabs[index == tabs.count - 1 ? index - 1 : index + 1], floatPrevious: false)
+            } else {
+                activeID = nil
+            }
+        }
+        tabs.remove(at: index)
+        removeEmptyGroup(tab.groupID)
+        tab.groupID = nil
+        if tabs.isEmpty { adopt(Tab(configuration: Web.configuration(space: spaceID))) }
+        writeSession(now: true)
+    }
+
+    /// A tab from another window, in front here. The empty tab a new window
+    /// starts with makes way for it.
+    func receive(_ tab: Tab) {
+        prepare(tab)
+        if !tab.shy { tab.rehome(in: spaceID) }
+        let blanks = tabs.filter { $0.isBlank && !$0.bench }
+        tabs.insert(tab, at: placeForNew())
+        select(tab, floatPrevious: false)
+        if tabs.count - blanks.count == 1 + pinnedCount {
+            for blank in blanks { tabs.removeAll { $0 === blank }; blank.close() }
+        }
+        if let active, active.id == tab.id, tab.asleep { _ = tab.wake() }
+        writeSession(now: true)
+    }
+
     /// A section can be made empty, then filled from a tab's menu.
     @discardableResult
     func addTabGroup(containing tab: Tab) -> UUID {

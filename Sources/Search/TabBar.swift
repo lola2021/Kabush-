@@ -253,7 +253,8 @@ struct TabBar: View {
                        room: strip - Metrics.lights - leading - 12, pill: pill,
                        close: { browser.close(tab) })
             .modifier(Carried(index: index, count: count, step: step, vertical: false,
-                              space: "strip", onDrop: { point in drop(tab, at: point) }) {
+                              space: "strip", onDrop: { point in drop(tab, at: point) },
+                              outside: { browser.dragOut(tab) }) {
                 if browser.prefs.usesTabGroups && tab.pin == nil {
                     browser.move(tab, within: group, to: $0)
                 } else {
@@ -650,6 +651,9 @@ struct Carried: ViewModifier {
     /// keeps its bearings (see the sidebar's grid).
     let space: String
     var onDrop: ((CGPoint) -> Void)? = nil
+    /// Let go outside the window: true when the tab was taken elsewhere —
+    /// another window, or a new one (see Browser.dragOut).
+    var outside: (() -> Bool)? = nil
     let move: (Int) -> Void
 
     @State private var held = false
@@ -684,7 +688,7 @@ struct Carried: ViewModifier {
                         }
                     }
                     .onEnded { value in
-                        onDrop?(value.location)
+                        if outside?() != true { onDrop?(value.location) }
                         withAnimation(Motion.settle) {
                             held = false
                             travel = 0
@@ -852,6 +856,23 @@ struct TabMenu: View {
                 }
             }
             .help("Pages moved to a Space with different sign-ins reopen there.")
+        }
+        if tab.pin == nil, !tab.bench {
+            // Another window, or a new one (see Browser.moveToWindow).
+            let others = Browsers.all.filter { $0 !== browser && $0.isOpen }
+            if others.isEmpty {
+                Button("Move to New Window") { browser.moveToWindow(tab, nil) }
+                    .disabled(browser.tabs.count < 2)
+            } else {
+                Menu("Move to Window") {
+                    Button("New Window") { browser.moveToWindow(tab, nil) }
+                        .disabled(browser.tabs.count < 2)
+                    Divider()
+                    ForEach(Array(others.enumerated()), id: \.offset) { _, other in
+                        Button(other.windowName) { browser.moveToWindow(tab, other) }
+                    }
+                }
+            }
         }
         Divider()
         Button("Rename") { browser.beginTabRename(tab) }
