@@ -28,6 +28,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Back, forward and reload can sit on the left, before the tabs, with the tabs across the top: Settings › Tabs › Back, forward and reload on the left. Off unless you turn it on. Thanks [@Guitaraholic](https://github.com/Guitaraholic) ([#298](https://github.com/driceroland/Search/pull/298))
 - Bringing things over works from Helium too: its bookmarks, history and passwords. Thanks [@bacecek](https://github.com/bacecek) ([#178](https://github.com/driceroland/Search/pull/178))
 - Bringing things over works from Comet too. Thanks [@gabrielemeksiz-ui](https://github.com/gabrielemeksiz-ui) ([#301](https://github.com/driceroland/Search/pull/301))
+- Bringing things over also finds Chrome Beta, Chrome Dev and Chrome Canary, which keep their data apart from Chrome, and Opera and Opera GX.
 
 ### Fixed
 
