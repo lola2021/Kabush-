@@ -114,7 +114,7 @@ enum WhatsNew {
     /// Newest first.
     static let notes: [Notes] = [
         Notes(
-            version: "1.0.4", date: "",
+            version: "1.0.4", date: "27 September 2026",
             headline: "Several windows, and a lot to discover. Most of what's new is off until you turn it on, and the card after the update offers it.",
             new: [
                 "Several windows. ⌘N opens one with its own tabs; drag a tab out of the row, or use Move to Window in its menu, and it moves with its page as it is. Pinned tabs are the same in every window.",
@@ -122,7 +122,7 @@ enum WhatsNew {
                 "⌃Tab shows your recent tabs as pictures, the last one first: a quick ⌃Tab goes back to the tab you were on.",
                 "Your own keyboard shortcuts, in Settings › Shortcuts.",
                 "Downloads show while they happen: a small circle fills beside the other buttons, and the Finder and the Dock show the progress too. The button can stay there for good.",
-                "Bring things over from Firefox, Zen, Helium, Comet, Opera and Chrome's other channels, or from an exported file.",
+                "Bring things over from Firefox, Zen, Helium, Comet, Opera, Chrome's other channels and Arc, its spaces and pinned tabs included, or from an exported file.",
                 "Site shortcuts: a word of your own before a search sends it to that site, like yt cats to YouTube.",
                 "Bookmarks in the order you choose, folders of your own, and a card to name a bookmark as you add it.",
                 "Videos can wait for a click, and every site can start at a zoom of your choice.",

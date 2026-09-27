@@ -11,6 +11,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+## 1.0.4 — 27 September 2026
+
 ### Added
 
 - The downloads button can stay beside the other buttons all the time, and open Downloads in one click; while a file comes in it fills as before. Off unless you turn it on in Settings › Downloads › Always show the downloads button. Thanks [@hkhrithik007](https://github.com/hkhrithik007) for asking ([#353](https://github.com/driceroland/Search/issues/353))
@@ -72,6 +74,8 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Security hardening across extensions, private tabs and passwords, from a second careful private report — thanks again to Vahagn Yengibaryan. An extension's access to websites never reaches another extension's pages; no extension can send a tab to a javascript: or file: address, from its background, its popup or a sign-in flow; installing from a Chrome Web Store page installs the extension that page shows; downloads.open needs its permission and opens only the extension's own downloads; search, notifications, idle, power and text-to-speech need theirs; and Search's own messages are taken only from the extension itself. alert, confirm and prompt from a tab in the background wait until you go to it; the site card and the passwords offered go by the page on screen, not one still loading; the accounts list under a sign-in box takes no click in its first half second; logins imported from Android apps are no longer taken for websites. Camera and microphone choices are kept per site and never for a private tab, a private tab's downloads stay out of the list, Clear History clears site icons too, a disabled or removed extension's offscreen page and keep-awake go with it, and outside test runs the bench lists no private tabs.
+- A few more safeguards: an extension can't open a private window, where it would have had a normal one; and a page on this Mac saved straight in your home folder, or at the top of a disk, is given access to itself only, not to everything beside it.
 - The Figma extension's button works once you're signed in: it asks, as in Chrome, to read and change every website, and when you agree its toolbar opens on the page. An extension asking for more access from a click on its button had the question refused, since the click was lost on the way; the question now comes, only right after such a click and only for what the extension named when it was installed.
 - The pinned tab you are on stands out among the other pins, in a darker grey, in the sidebar and across the top, light or dark; it barely showed against the others' grey.
 - Switching to another app while a video plays full screen no longer leaves Search's window black when you come back: the video stays full screen in its own space, as in Safari, instead of floating out of it. Thanks [@dttdrv](https://github.com/dttdrv) ([#372](https://github.com/driceroland/Search/pull/372))
