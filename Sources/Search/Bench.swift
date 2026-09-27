@@ -2113,6 +2113,9 @@ final class Bench {
     /// A small model bridge for offline split regressions. The browser model is
     /// the system under test; this command is deliberately unavailable in the
     /// browser somebody is using because its actions move and close tabs.
+    /// The view a `split mouse … to: view` press landed on, for the rest of it.
+    private weak var pressed: NSView?
+
     private func splitCommand(
         _ request: [String: Any],
         browser: Browser,
@@ -2183,22 +2186,45 @@ final class Bench {
 
         case "mouse":
             guard let window = browser.window,
-                  let points = request["points"] as? [[Double]], points.count >= 2,
+                  let points = request["points"] as? [[Double]], !points.isEmpty,
                   points.allSatisfy({ $0.count == 2 }) else {
                 answer(["error": "split mouse needs two or more [x,y] window points"]); return
             }
+            // "hold": the button stays down after the last point; "resume":
+            // it was already down, so the first point is a drag — a drag in
+            // two calls, looked at in between. "clicks": 2 for a double-click.
+            let hold = request["hold"] as? Bool == true
+            let resume = request["resume"] as? Bool == true
+            let clicks = request["clicks"] as? Int ?? 1
+            let direct = request["to"] as? String == "view"
             for (index, coordinates) in points.enumerated() {
-                let type: NSEvent.EventType = index == 0 ? .leftMouseDown
-                    : index == points.count - 1 ? .leftMouseUp : .leftMouseDragged
+                let type: NSEvent.EventType = index == 0 && !resume ? .leftMouseDown
+                    : index == points.count - 1 && !hold ? .leftMouseUp : .leftMouseDragged
                 let point = NSPoint(x: coordinates[0], y: Double(window.frame.height) - coordinates[1])
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: index, clickCount: 1,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: index, clickCount: clicks,
                     pressure: type == .leftMouseUp ? 0 : 1
                 ) else { continue }
-                NSApp.postEvent(event, atStart: false)
+                // Through the app, as a hand's arrive, one turn of the run
+                // loop apart: its monitors see them, though a hidden window
+                // hands them to no view. "view": straight to the view under
+                // the press instead, as `tap` does, for what the view itself
+                // does with them.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02 * Double(index)) {
+                    guard direct else { NSApp.sendEvent(event); return }
+                    if type == .leftMouseDown {
+                        let root = window.contentView?.superview
+                        self.pressed = root.flatMap { $0.hitTest($0.convert(point, from: nil)) }
+                    }
+                    switch type {
+                    case .leftMouseDown: self.pressed?.mouseDown(with: event)
+                    case .leftMouseDragged: self.pressed?.mouseDragged(with: event)
+                    default: self.pressed?.mouseUp(with: event)
+                    }
+                }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { reply() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02 * Double(points.count) + 0.4) { reply() }
 
         case "open":
             guard let url = (request["url"] as? String).flatMap(URL.init(string:)) else {

@@ -383,10 +383,7 @@ struct ContentView: View {
     @ViewBuilder
     private var stage: some View {
         if browser.prefs.splitView {
-            BrowserStage(browser: browser) { tab in
-                guard browser.activeSplit != nil, browser.activeID != tab.id else { return }
-                browser.focusPane(tab)
-            }
+            SplitStage(browser: browser)
         } else if let tab = browser.active {
             Page(tab: tab)
                 .overlay {

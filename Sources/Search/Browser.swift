@@ -2064,7 +2064,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Once a drag of the divider is over, or once an arrow key moved it:
-    /// the drag itself is followed by the stage alone (see BrowserStage).
+    /// the drag itself is followed by the stage alone (see PaneStage).
     func setSplitFraction(_ id: UUID, fraction: Double) {
         guard fraction.isFinite, let index = splits.firstIndex(where: { $0.id == id }) else { return }
         let sizes = TabSplit.clamp([fraction, 1 - fraction])
