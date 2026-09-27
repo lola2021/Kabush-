@@ -305,6 +305,7 @@ extension Browser {
         // Gone from the other windows too: their rows there, and the space
         // itself if one was showing it (the list's change moves it).
         for other in Browsers.all where other !== self { other.forget(space: id) }
+        Pins.forget(id)
         // A space signed in with the others has nothing of its own to erase:
         // its cookies are theirs.
         if !shared { Spaces.erase(id) }

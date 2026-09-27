@@ -444,6 +444,8 @@ final class Tab: ObservableObject, Identifiable {
     /// For a pin, the page it was pinned at: a double-click on it goes back
     /// there (Browser.goHome).
     var home: URL?
+    /// For a pin, which of the pins it is, in every window (see Pins.swift).
+    var pinID: UUID?
 
     /// The group that holds this ordinary tab in the sidebar.
     @Published var groupID: UUID?

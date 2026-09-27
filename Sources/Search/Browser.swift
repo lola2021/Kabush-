@@ -734,6 +734,7 @@ final class Browser: NSObject, ObservableObject {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
         tab.home = nil
+        tab.pinID = nil
         defer { writeSession(now: true) }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
@@ -988,6 +989,14 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
 
+        // So are the pins.
+        NotificationCenter.default.publisher(for: Pins.changed)
+            .sink { [weak self] note in
+                guard let self, (note.object as? Browser) !== self, let space = note.userInfo?["space"] as? UUID else { return }
+                pinsChanged(in: space)
+            }
+            .store(in: &bag)
+
         // The spaces are every window's: one renamed, added or taken away in
         // another window is so here too.
         NotificationCenter.default.publisher(for: Spaces.changed)
@@ -1070,24 +1079,12 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The row of tabs the space on screen had last time, or one empty tab.
+    /// The pins are every window's (see Pins.swift): a window new to this
+    /// space has them too, before an empty tab.
     func restoreSession() {
         let saved = readRow(spaceID)
         tabGroups = (saved.groups ?? []).filter { group in
             saved.tabs.contains { $0.groupID == group.id }
-        }
-        guard !saved.tabs.isEmpty else {
-            // A blank tab costs nothing until it is asked for its page. Its
-            // web view — and with it WebKit's helper processes — is built a
-            // moment after the window is up, so that the first address typed
-            // finds everything already running, and the first frame never
-            // had to share the CPU with it.
-            let tab = Tab(configuration: Web.configuration(space: spaceID))
-            adopt(tab)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tab] in
-                guard let tab, tab.isBlank else { return }
-                _ = tab.web
-            }
-            return
         }
         // Built apart and put in the row at once: the saved front tab is
         // counted in the file's order, which the groups may rearrange.
@@ -1098,17 +1095,32 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.pinID = entry.pin == nil ? nil : entry.pinID
             tab.home = Browser.home(of: entry, at: url)
             tab.groupID = entry.pin == nil && tabGroups.contains(where: { $0.id == entry.groupID })
                 ? entry.groupID : nil
             row.append(tab)
         }
-        guard !row.isEmpty else {
-            adopt(Tab(configuration: Web.configuration(space: spaceID)))
+        let saidFront = row.indices.contains(saved.active) ? row[saved.active] : nil
+        row = reconcilePins(row, space: spaceID)
+        let front = saidFront.flatMap { f in row.contains { $0 === f } ? f : nil }
+            ?? (saved.tabs.isEmpty ? nil : row.first { $0.pin == nil } ?? row.first)
+        tabs += row
+        guard let first = front else {
+            // A blank tab costs nothing until it is asked for its page. Its
+            // web view — and with it WebKit's helper processes — is built a
+            // moment after the window is up, so that the first address typed
+            // finds everything already running, and the first frame never
+            // had to share the CPU with it.
+            let tab = Tab(configuration: Web.configuration(space: spaceID))
+            adopt(tab)
+            activeID = tab.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tab] in
+                guard let tab, tab.isBlank else { return }
+                _ = tab.web
+            }
             return
         }
-        let first = row[min(max(0, saved.active), row.count - 1)]
-        tabs += row
         activeID = first.id
         // Only the one you were looking at actually loads. Started hidden,
         // it waits for the extensions, which load at once then, so that
@@ -1276,7 +1288,72 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func writeSession(now: Bool = false) {
+        // The pins as they are here, for the other windows (see Pins.swift).
+        Pins.set(spaceID, pinDefs(tabs), from: self)
         writeRow(spaceID, session(tabs, active: activeID, groups: tabGroups), now: now)
+    }
+
+    // MARK: - pins, the same in every window
+
+    /// What makes this row's pinned tabs pins, in their order.
+    private func pinDefs(_ row: [Tab]) -> [PinDef] {
+        row.compactMap { tab -> PinDef? in
+            guard let letter = tab.pin else { return nil }
+            if tab.pinID == nil { tab.pinID = UUID() }
+            return PinDef(id: tab.pinID ?? UUID(), letter: letter,
+                          home: (tab.home ?? tab.pending ?? tab.address)?.absoluteString ?? "",
+                          title: tab.title, name: tab.name)
+        }
+    }
+
+    /// A row with the space's pins as they are now: this window's own tab
+    /// for each, relettered and in order, one made asleep at its page for a
+    /// pin new to this window, and the tab of a pin taken away closed. A
+    /// pinned tab from before pins had ids is matched by letter and page,
+    /// then by place.
+    func reconcilePins(_ row: [Tab], space: UUID) -> [Tab] {
+        let defs = Pins.defs(space)
+        var pinned = row.filter { $0.pin != nil }
+        let loose = row.filter { $0.pin == nil }
+        var out: [Tab] = []
+        for def in defs {
+            let found = pinned.first { $0.pinID == def.id }
+                ?? pinned.first { $0.pinID == nil && $0.pin == def.letter && ($0.home?.absoluteString ?? "") == def.home }
+                ?? pinned.first { $0.pinID == nil }
+            let tab: Tab
+            if let found {
+                pinned.removeAll { $0 === found }
+                tab = found
+            } else {
+                tab = Tab(configuration: Web.configuration(space: space))
+                prepare(tab)
+                tab.restore(url: URL(string: def.home) ?? URL(string: "about:blank")!, title: def.title, name: def.name)
+            }
+            tab.pinID = def.id
+            if tab.pin != def.letter { tab.pin = def.letter }
+            if tab.name != def.name { tab.name = def.name }
+            tab.home = URL(string: def.home)
+            out.append(tab)
+        }
+        for gone in pinned { gone.close() }
+        return out + loose
+    }
+
+    /// Another window changed a space's pins: this window's row there follows.
+    private func pinsChanged(in space: UUID) {
+        if space == spaceID {
+            let row = reconcilePins(tabs, space: space)
+            if row.map(\.id) != tabs.map(\.id) { tabs = row }
+            if !tabs.contains(where: { $0.id == activeID }) {
+                activeID = tabs.first { $0.pin == nil }?.id ?? tabs.first?.id
+                if activeID == nil { newTab() }
+            }
+            writeRow(spaceID, session(tabs, active: activeID, groups: tabGroups), now: false)
+        } else if var row = parked[space] {
+            row.tabs = reconcilePins(row.tabs, space: space)
+            if !row.tabs.contains(where: { $0.id == row.active }) { row.active = row.tabs.first?.id }
+            parked[space] = row
+        }
     }
 
     // MARK: - this window's rows, wherever they are kept
@@ -1343,7 +1420,8 @@ final class Browser: NSObject, ObservableObject {
             if tab.id == id { active = entries.count }
             entries.append(Session.Entry(
                 url: url.absoluteString, title: tab.title, pin: tab.pin, name: tab.name,
-                home: tab.pin == nil ? nil : tab.home?.absoluteString, groupID: tab.groupID
+                home: tab.pin == nil ? nil : tab.home?.absoluteString, groupID: tab.groupID,
+                pinID: tab.pin == nil ? nil : tab.pinID
             ))
         }
         // The tab you were on isn't kept — a private or blank one: the one
@@ -2067,12 +2145,15 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
+            tab.pinID = entry.pin == nil ? nil : entry.pinID
             tab.home = Browser.home(of: entry, at: url)
             tab.groupID = entry.pin == nil && savedGroups.contains(where: { $0.id == entry.groupID })
                 ? entry.groupID : nil
             row.append(tab)
         }
-        let active = row.indices.contains(saved.active) ? row[saved.active].id : row.first?.id
+        let said = row.indices.contains(saved.active) ? row[saved.active].id : nil
+        row = reconcilePins(row, space: space)
+        let active = said.flatMap { id in row.contains { $0.id == id } ? id : nil } ?? row.first?.id
         return Parked(tabs: row, active: active)
     }
 
