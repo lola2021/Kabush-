@@ -46,6 +46,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A link's right-click menu says Open Link in New Tab, which is what it does: it said Open Link in New Window, as WebKit names it, and opened a tab. Thanks [@AxxzyWasTaken](https://github.com/AxxzyWasTaken) ([#296](https://github.com/driceroland/Search/pull/296), [#295](https://github.com/driceroland/Search/issues/295))
 - ⌥⌫ in the address field with an ending offered lets go of it and deletes the last word typed, as it does with no ending there; it did nothing at all. Thanks [@merttopuz](https://github.com/merttopuz) ([#244](https://github.com/driceroland/Search/pull/244)), and [@JustinyAhin](https://github.com/JustinyAhin) for the report ([#228](https://github.com/driceroland/Search/issues/228))
 - Address suggestions keep up with a long history: plain addresses are matched as bytes, and only the best three are kept while the history is read, instead of a suggestion made for every match and all of them sorted on every key. The list is the same. Thanks [@Vedaant-Rajoo](https://github.com/Vedaant-Rajoo) ([#306](https://github.com/driceroland/Search/pull/306)), and [@TesterPen0812](https://github.com/TesterPen0812) for measuring it ([#200](https://github.com/driceroland/Search/issues/200))
+- The site card grows to show a connection's details in full, with Show Certificate and Back, and shrinks again on Back, where it kept its first size and cut them off. Thanks [@kinnrai](https://github.com/kinnrai) ([#258](https://github.com/driceroland/Search/pull/258))
 
 ## 1.0.3 — 24 September 2026
 
