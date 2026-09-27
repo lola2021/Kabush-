@@ -126,7 +126,9 @@ final class Preferences: ObservableObject {
         didSet { store.set(welcomed, forKey: "welcomed") }
     }
     /// macOS's own autocorrect, inside web pages: the little "Not ×" that
-    /// capitalises what you meant to leave lower-case. Off unless asked for.
+    /// capitalises what you meant to leave lower-case. As the Mac has it
+    /// (System Settings › Keyboard › Correct spelling automatically) until
+    /// the switch here is used.
     @Published var autocorrect: Bool {
         didSet {
             store.set(autocorrect, forKey: "autocorrect")
@@ -157,10 +159,8 @@ final class Preferences: ObservableObject {
             FrameRate.fast = fastPages
         }
     }
-    /// Where a link goes, at the bottom of the page while the pointer is on
-    /// it (see StatusLine.swift). Off unless asked for.
     /// Shift-click on a link opens it in a panel over the page (see
-    /// Peek.swift). Off unless asked for.
+    /// Peek.swift). On unless turned off.
     @Published var peeksLinks: Bool {
         didSet { store.set(peeksLinks, forKey: "links.peek") }
     }
@@ -174,6 +174,8 @@ final class Preferences: ObservableObject {
     @Published var bookmarksBar: Bool {
         didSet { store.set(bookmarksBar, forKey: "bookmarks.bar") }
     }
+    /// Where a link goes, at the bottom of the page while the pointer is on
+    /// it (see StatusLine.swift). On unless turned off.
     @Published var showsLinks: Bool {
         didSet {
             store.set(showsLinks, forKey: "links.show")
@@ -181,7 +183,7 @@ final class Preferences: ObservableObject {
         }
     }
     /// Two fingers flick the floating video to a corner (see Float.swift).
-    /// Off unless asked for.
+    /// On unless turned off.
     @Published var floatFlicks: Bool {
         didSet {
             store.set(floatFlicks, forKey: "float.flicks")
@@ -276,16 +278,18 @@ final class Preferences: ObservableObject {
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
         usesSpaces = store.bool(forKey: "spaces")
-        let flicks = store.bool(forKey: "float.flicks")
+        // On for everyone who never touched these three switches (Drice,
+        // 27 Sep 2026); a choice made before stands.
+        let flicks = store.object(forKey: "float.flicks") as? Bool ?? true
         floatFlicks = flicks
         Float.flicks = flicks
         floatsAway = store.bool(forKey: "float.away")
         floatsOnLeave = store.object(forKey: "float.leave") as? Bool ?? true
         installsUpdates = store.object(forKey: Updater.installKey) as? Bool ?? true
-        peeksLinks = store.bool(forKey: "links.peek")
+        peeksLinks = store.object(forKey: "links.peek") as? Bool ?? true
         littleLinks = store.bool(forKey: "links.little")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
-        let links = store.bool(forKey: "links.show")
+        let links = store.object(forKey: "links.show") as? Bool ?? true
         showsLinks = links
         HoveredLink.on = links
         let scrolls = store.bool(forKey: "autoscroll")
@@ -297,7 +301,8 @@ final class Preferences: ObservableObject {
         // Left behind by the Web Inspector's switch, from before it was
         // always there.
         store.removeObject(forKey: "inspector")
-        let corrects = store.bool(forKey: "autocorrect")
+        let corrects = store.object(forKey: "autocorrect") as? Bool
+            ?? NSSpellChecker.isAutomaticSpellingCorrectionEnabled
         autocorrect = corrects
         // Before the first web view exists: WebKit reads these once.
         Preferences.tellWebKit(autocorrect: corrects)
