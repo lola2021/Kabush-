@@ -95,6 +95,7 @@ struct KeyCombo: Codable, Hashable {
     static func isReserved(_ combo: KeyCombo) -> Bool {
         let system: Set<KeyCombo> = [
             KeyCombo("q"), KeyCombo("q", option: true), KeyCombo("q", control: true),
+            KeyCombo("q", shift: true), KeyCombo("q", shift: true, option: true),
             KeyCombo("h"), KeyCombo("h", option: true), KeyCombo("m"), KeyCombo("m", option: true),
             KeyCombo("c"), KeyCombo("v"), KeyCombo("x"), KeyCombo("a"), KeyCombo("z"), KeyCombo("z", shift: true),
             KeyCombo("`"), KeyCombo("`", shift: true), KeyCombo("f", control: true),
@@ -214,8 +215,11 @@ final class ShortcutStore: ObservableObject {
     private var manifest: [String: Override] = [:]
 
     private init() {
-        changed = Store.settings.data(forKey: "shortcuts")
+        // Read with the same rules the Settings box keeps: a key that isn't
+        // ours to give stays the Mac's, whatever the file says.
+        let saved = Store.settings.data(forKey: "shortcuts")
             .flatMap { try? JSONDecoder().decode([String: Override].self, from: $0) } ?? [:]
+        changed = saved.filter { $0.value.key.map { !KeyCombo.isReserved($0) } ?? true }
     }
 
     func key(for id: String) -> KeyCombo? {
@@ -233,6 +237,12 @@ final class ShortcutStore: ObservableObject {
     /// A command you gave `combo`, for the key monitor to run.
     func changedCommand(on combo: KeyCombo) -> Command? {
         Command.all.first { changed[$0.id] != nil && key(for: $0.id) == combo }
+    }
+
+    /// A key an extension may not have: one of the Mac's, or one of
+    /// Search's commands has as things stand.
+    func keepsFromExtensions(_ combo: KeyCombo) -> Bool {
+        KeyCombo.isReserved(combo) || Command.all.contains { key(for: $0.id) == combo }
     }
 
     /// A key the menus had that no command has now: the page's again.
@@ -323,12 +333,17 @@ extension ShortcutStore {
     }
 
     /// An extension just loaded: the keys it came with noted, and yours
-    /// put in their place.
+    /// put in their place. A key its manifest asks for that is the Mac's,
+    /// or that one of Search's commands has, it doesn't get — as in Chrome,
+    /// an extension never has a key the browser uses. Its command is left
+    /// without one, for you to give it one in Settings if you like.
     func adopt(_ context: WKWebExtensionContext, id ext: String) {
         for command in context.commands {
             let id = "ext:\(ext):\(command.id)"
-            manifest[id] = Override(key: KeyCombo(activation: command.activationKey, flags: command.modifierFlags))
-            if changed[id] != nil { applied(id) }
+            let asked = KeyCombo(activation: command.activationKey, flags: command.modifierFlags)
+            let free = asked.map { !keepsFromExtensions($0) } ?? true
+            manifest[id] = Override(key: free ? asked : nil)
+            if changed[id] != nil || !free { applied(id) }
         }
     }
 }

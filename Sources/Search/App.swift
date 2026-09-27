@@ -1044,8 +1044,10 @@ struct ContentView: View {
         }
 
         // A shortcut an extension registered — ⌥⇧D, ⌃⇧Y — before ours, since
-        // none of ours use those.
+        // none of ours use those. Never one of ours, nor one of the Mac's:
+        // those an extension doesn't get (see ShortcutStore.adopt).
         if #available(macOS 15.4, *), !flags.intersection([.command, .option, .control]).isEmpty,
+           KeyCombo(event: event).map({ !ShortcutStore.shared.keepsFromExtensions($0) }) ?? true,
            Extensions.shared.take(event) {
             return true
         }
