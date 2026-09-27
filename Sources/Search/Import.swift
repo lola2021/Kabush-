@@ -404,7 +404,10 @@ enum Chromium {
                     let manifest = entry["manifest"] as? [String: Any] ?? [:]
                     guard manifest["theme"] == nil else { return nil }
                     // From another store, Edge's say: not the Chrome Web Store's to give.
-                    if let update = manifest["update_url"] as? String, !update.contains("google.com") { return nil }
+                    if let update = manifest["update_url"] as? String {
+                        let host = URL(string: update)?.host()?.lowercased() ?? ""
+                        guard host == "google.com" || host.hasSuffix(".google.com") else { return nil }
+                    }
                     return id
                 }
             }
@@ -452,6 +455,8 @@ enum Chromium {
         var key = [UInt8](repeating: 0, count: 16)
         let salt = Array("saltysalt".utf8)
         let pass = Array(passphrase.utf8)
+        // No passphrase, no key: the logins then just don't decrypt.
+        guard !pass.isEmpty else { return key }
         pass.withUnsafeBufferPointer { p in
             salt.withUnsafeBufferPointer { s in
                 _ = CCKeyDerivationPBKDF(
@@ -1035,7 +1040,10 @@ enum Mozilla {
             let kp = items(kdf[1].body)
             guard kp.count >= 2 else { return nil }
             let entrySalt = kp[0].body
+            // A corrupt file's count could be anything; NSS writes 10,000.
+            guard kp[1].body.count <= 4 else { return nil }
             let rounds = integer(kp[1].body)
+            guard (1...10_000_000).contains(rounds), !entrySalt.isEmpty else { return nil }
             let enc = items(params[1].body)
             guard enc.count == 2 else { return nil }
             let ck = sha256(globalSalt + password)
@@ -1071,8 +1079,10 @@ enum Mozilla {
         var j = i + 1
         var len = Int(b[j]); j += 1
         if len & 0x80 != 0 {
+            // At most four bytes of length: nothing in key4.db is longer,
+            // and more would overflow what they add up to.
             let n = len & 0x7f
-            guard n > 0, j + n <= b.count else { return nil }
+            guard n > 0, n <= 4, j + n <= b.count else { return nil }
             len = 0
             for _ in 0..<n { len = (len << 8) | Int(b[j]); j += 1 }
         }
@@ -1124,6 +1134,7 @@ enum Mozilla {
     }
 
     private static func pbkdf2SHA256(_ pass: [UInt8], salt: [UInt8], rounds: Int, length: Int) -> [UInt8]? {
+        guard !pass.isEmpty, !salt.isEmpty, rounds > 0, rounds <= Int(UInt32.max) else { return nil }
         var out = [UInt8](repeating: 0, count: length)
         let status = pass.withUnsafeBufferPointer { p in
             salt.withUnsafeBufferPointer { s in
@@ -1141,7 +1152,8 @@ enum Mozilla {
 
     /// CBC decryption with PKCS#7 padding stripped, for AES-256 or 3DES.
     private static func decryptCBC(_ data: [UInt8], algorithm: Int, key: [UInt8], iv: [UInt8], blockSize: Int) -> [UInt8]? {
-        guard !data.isEmpty else { return nil }
+        // CommonCrypto reads a whole block of IV, whatever the array holds.
+        guard !data.isEmpty, iv.count == blockSize else { return nil }
         var out = [UInt8](repeating: 0, count: data.count + blockSize)
         var moved = 0
         let status = CCCrypt(

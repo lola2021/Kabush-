@@ -107,6 +107,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The bookmarks list stays open while you reach for a bookmark with the column folded away: the column no longer folds under it as the pointer crosses the page, and folds as soon as the list closes. The extensions menu is held the same way. Thanks [@merttopuz](https://github.com/merttopuz) ([#89](https://github.com/driceroland/Search/pull/89), [#88](https://github.com/driceroland/Search/issues/88))
 - A tab no longer wears another site's icon: an icon still on its way from the site the tab has just left is not put on it, the www. and bare address of a site share one, and an icon a page names by a relative path is found. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#216](https://github.com/driceroland/Search/pull/216), [#181](https://github.com/driceroland/Search/issues/181))
 - An extension's shortcut keeps to keys Search doesn't use: one its manifest asks for that is the Mac's, or one of Search's commands has, is left without a key, as in Chrome, and can be given another in Settings › Shortcuts.
+- Bringing things over from a damaged Firefox or Zen profile ends with a message rather than closing Search, and a folder or ZIP is read only as deep as Safari's own export goes.
 
 ## 1.0.3 — 24 September 2026
 
