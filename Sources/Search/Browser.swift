@@ -1388,8 +1388,8 @@ final class Browser: NSObject, ObservableObject {
     /// becomes a space here — the one of the same name if there is one,
     /// signed in with the others when Arc's used its first profile — its
     /// pinned list the space's tabs, asleep until gone to, folders opened
-    /// out in their order; the favourites, the icons above every space in
-    /// Arc, become each space's pins. A lone space, with spaces off, comes
+    /// out in their order; the favourites, the icons above every space of
+    /// a profile in Arc, become the pins of that profile's spaces. A lone space, with spaces off, comes
     /// into the one there is; more than one turns spaces on. Nothing twice:
     /// a page already in the row, or a pin already there, isn't added again.
     @discardableResult
@@ -1419,7 +1419,9 @@ final class Browser: NSObject, ObservableObject {
         }
         for target in targets {
             var defs = Pins.defs(target.id)
-            for favourite in sidebar.favorites where !defs.contains(where: { $0.home == favourite.url.absoluteString }) {
+            // A space's own profile's favourites, as Arc shows them above it.
+            let favourites = target.space.flatMap { sidebar.favoritesByProfile[$0.profile] } ?? sidebar.favorites
+            for favourite in favourites where !defs.contains(where: { $0.home == favourite.url.absoluteString }) {
                 let host = favourite.url.host()?.replacingOccurrences(of: "www.", with: "") ?? ""
                 defs.append(PinDef(id: UUID(), letter: host.first.map { String($0).uppercased() } ?? "•",
                                    home: favourite.url.absoluteString, title: favourite.title, name: nil))
