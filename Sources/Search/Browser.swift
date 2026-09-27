@@ -272,7 +272,7 @@ final class Browser: NSObject, ObservableObject {
 
     struct Suggesting: Equatable {
         let tab: Tab.ID
-        let spot: CGRect
+        var spot: CGRect
         let logins: [Login]
         /// The page the list was made for: its site, and whether it came in
         /// the clear. A click fills only a page that still is that one.
@@ -291,6 +291,10 @@ final class Browser: NSObject, ObservableObject {
     /// instant: clicking a row can take the caret out of the page first, and
     /// a list that vanished on the way down would never be clicked.
     private var lowering: DispatchWorkItem?
+    /// The page whose accounts were last looked up for the box the caret is
+    /// in. The box reports where it is on every frame of a scroll so the
+    /// list can follow it; the keychain is asked once per box, not per frame.
+    private var looked: (tab: Tab.ID, host: String, clear: Bool)?
 
     func keepOffer() {
         guard let offer = offering else { return }
@@ -1162,6 +1166,8 @@ final class Browser: NSObject, ObservableObject {
         cancelTabEdit()
         summoning = false
         suggesting = nil
+        // Back on a tab with the caret still in a box, the list may come again.
+        looked = nil
         guard tab.id != activeID else { return }
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
@@ -1742,6 +1748,7 @@ final class Browser: NSObject, ObservableObject {
         tab.onField = { [weak self] tab, spot in
             guard let self else { return }
             guard let spot else {
+                if looked?.tab == tab.id { looked = nil }
                 if pickedInto == tab.id { pickedInto = nil }
                 guard suggesting?.tab == tab.id else { return }
                 lowering?.cancel()
@@ -1762,6 +1769,19 @@ final class Browser: NSObject, ObservableObject {
             // offered only what was kept from plain http too, never an
             // account kept from the https site of the same name.
             let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
+            // The same box, moved by a scroll: the list up follows it, keeping
+            // its accounts and the moment it came up (a click is refused for
+            // its first half second, which every frame used to start again);
+            // a box with no accounts stays without, and the keychain isn't
+            // asked again until the caret leaves.
+            if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear {
+                if var up = suggesting, up.tab == tab.id, up.spot != spot {
+                    up.spot = spot
+                    suggesting = up
+                }
+                return
+            }
+            looked = (tab.id, host, inTheClear)
             let known = Array(Vault.logins(matching: host).filter { !inTheClear || $0.clear }.prefix(5))
             suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known, host: host, clear: inTheClear)
         }
