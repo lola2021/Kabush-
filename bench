@@ -88,6 +88,11 @@
                                        frame the page draws for SECS (1), its size, the video's box and how much
                                        of the view it fills → PATH.json; from a probe started hidden, both
                                        windows kept off every screen — --test runs only
+    ./bench float screens [two] | place X Y | swipe DX DY [STEPS] [MS] | wheel DX DY | click
+                                       test run: the floating window's gestures (after film float, so it is
+                                       off every screen), on a made-up 1440×900 screen, or two side by side:
+                                       where a flick, a pull at a side, a dock or a click on the sliver
+                                       leaves it, and how far it swings on the way
     ./bench ui KEY VALUE               settings/passwords/welcome/history/downloads/bookmarks/hidden on|off,
                                        import on|off|extensions|BROWSER,
                                        look light|dark|system, sidebar on|off, side left|right, spaces on|off, hides on|off,
@@ -347,6 +352,15 @@ def main(argv):
     elif verb == "picture":
         if len(args) != 1: sys.exit("usage: bench picture PATH")
         request["path"] = os.path.abspath(args[0])
+    elif verb == "float":
+        usage = "usage: bench float screens [two] | place X Y | swipe DX DY [STEPS] [MS] | wheel DX DY | click"
+        if not args or args[0] not in ("screens", "place", "swipe", "wheel", "click", "state"): sys.exit(usage)
+        request["action"] = args[0]
+        if args[0] == "screens":
+            request["two"] = args[1:] == ["two"]
+        else:
+            try: request["args"] = [float(a) for a in args[1:]]
+            except ValueError: sys.exit(usage)
     elif verb == "film":
         if len(args) not in (2, 3, 4) or args[0] not in ("peek", "unpeek", "fold", "none", "float", "land"):
             sys.exit("usage: bench film peek|unpeek|fold|none|float|land PATH [FRAMES] [EVERY]")

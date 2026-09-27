@@ -1292,6 +1292,118 @@ final class Bench {
                 }
             }
 
+        case "float":
+            // The floating window's gestures, handed to it as a trackpad, a
+            // wheel or a click would, on screens made up far off the real
+            // ones: where a flick, a pull at a side, a dock and a click on
+            // the sliver leave it. Test runs only, with the window off every
+            // screen (after `film float`), and nothing shown.
+            guard Store.testing else { answer(["error": "float only works on a --test run"]); return }
+            guard Float.benchAway != nil,
+                  let panel = NSApp.windows.first(where: { "\(type(of: $0))" == "Panel" && $0.isVisible }),
+                  let controls = panel.contentView?.subviews.first(where: { "\(type(of: $0))" == "Controls" })
+            else { answer(["error": "float needs the floating window up, off screen (film float first)"]); return }
+            let screen = NSRect(x: -30000, y: -30000, width: 1440, height: 900)
+            if Float.benchScreens == nil { Float.benchScreens = [screen] }
+            func state() -> [String: Any] {
+                let f = panel.frame
+                let first = Float.benchScreens?.first ?? screen
+                let made: [[Int]] = (Float.benchScreens ?? []).map { made in
+                    [Int(made.minX - first.minX), Int(made.minY - first.minY), Int(made.width), Int(made.height)]
+                }
+                let x = Int((f.minX - first.minX).rounded()), y = Int((f.minY - first.minY).rounded())
+                let shown = Int((f.intersection(first).width / f.width * 100).rounded())
+                return ["x": x, "y": y, "width": Int(f.width), "height": Int(f.height), "screens": made, "shown": shown]
+            }
+            // Where it goes on its way, every few milliseconds for a second
+            // and a bit: how far out it swings, and where it comes to rest.
+            func follow(_ done: @escaping ([String: Any]) -> Void) {
+                let first = Float.benchScreens?.first ?? screen
+                var xs: [Int] = []
+                func look(_ left: Int) {
+                    xs.append(Int((panel.frame.minX - first.minX).rounded()))
+                    guard left > 0 else {
+                        var out = state()
+                        out["path"] = xs.enumerated().filter { $0.offset % 4 == 0 }.map(\.element)
+                        out["least"] = xs.min() ?? 0
+                        out["most"] = xs.max() ?? 0
+                        done(out)
+                        return
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { look(left - 1) }
+                }
+                look(130)
+            }
+            // A scroll event whose fingers went `way` on screen, as the
+            // window reads it, whatever the Mac's scrolling direction.
+            func scroll(_ way: CGVector, phase: Int64, continuous: Bool) -> NSEvent? {
+                func make(_ dx: Double, _ dy: Double) -> NSEvent? {
+                    guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: continuous ? .pixel : .line, wheelCount: 2, wheel1: 0, wheel2: 0, wheel3: 0)
+                    else { return nil }
+                    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: continuous ? 1 : 0)
+                    if continuous {
+                        cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: dy)
+                        cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: dx)
+                    } else {
+                        cg.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: Int64(dy))
+                        cg.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: Int64(dx))
+                    }
+                    cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                    return NSEvent(cgEvent: cg)
+                }
+                guard let probe = make(1, 1) else { return nil }
+                let sign: CGFloat = probe.isDirectionInvertedFromDevice ? 1 : -1
+                let perX = sign * probe.scrollingDeltaX, perY = -sign * probe.scrollingDeltaY
+                guard perX != 0, perY != 0 else { return nil }
+                return make(Double(way.dx / perX), Double(way.dy / perY))
+            }
+            let args = request["args"] as? [Double] ?? []
+            switch request["action"] as? String {
+            case "screens":
+                // One made-up screen, or two side by side.
+                Float.benchScreens = request["two"] as? Bool == true
+                    ? [screen, screen.offsetBy(dx: screen.width, dy: 0)] : [screen]
+                answer(state())
+            case "place":
+                guard args.count == 2 else { answer(["error": "float place X Y"]); return }
+                let first = Float.benchScreens?.first ?? screen
+                panel.setFrameOrigin(NSPoint(x: first.minX + args[0], y: first.minY + args[1]))
+                answer(state())
+            case "swipe":
+                // Fingers down, DX, DY on screen in STEPS moves MS apart, up.
+                guard args.count >= 2 else { answer(["error": "float swipe DX DY [STEPS] [MS]"]); return }
+                let steps = max(1, Int(args.count > 2 ? args[2] : 10))
+                let gap = (args.count > 3 ? args[3] : 16) / 1000
+                let step = CGVector(dx: args[0] / Double(steps), dy: args[1] / Double(steps))
+                if let down = scroll(.zero, phase: 1, continuous: true) { controls.scrollWheel(with: down) }
+                func move(_ n: Int) {
+                    guard n < steps else {
+                        if let up = scroll(.zero, phase: 4, continuous: true) { controls.scrollWheel(with: up) }
+                        follow { answer($0) }
+                        return
+                    }
+                    if let e = scroll(step, phase: 2, continuous: true) { controls.scrollWheel(with: e) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + gap) { move(n + 1) }
+                }
+                move(0)
+            case "wheel":
+                guard args.count == 2, let e = scroll(CGVector(dx: args[0], dy: args[1]), phase: 0, continuous: false)
+                else { answer(["error": "float wheel DX DY"]); return }
+                controls.scrollWheel(with: e)
+                follow { answer($0) }
+            case "click":
+                let middle = NSPoint(x: panel.frame.width / 2, y: panel.frame.height / 2)
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    guard let e = NSEvent.mouseEvent(with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                     windowNumber: panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                                                     pressure: type == .leftMouseUp ? 0 : 1) else { continue }
+                    if type == .leftMouseDown { controls.mouseDown(with: e) } else { controls.mouseUp(with: e) }
+                }
+                follow { answer($0) }
+            default:
+                answer(state())
+            }
+
         case "film" where ["float", "land"].contains(request["action"] as? String ?? ""):
             // The video going out into its floating window, or back into its
             // tab (#257), recorded by the page itself on every frame it
@@ -1805,7 +1917,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }
