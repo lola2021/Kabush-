@@ -270,7 +270,11 @@ final class Bench {
         }
         let patience = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 : 25
         DispatchQueue.main.asyncAfter(deadline: .now() + patience) { answer(["error": "no answer within \(Int(patience)) s"]) }
-        guard let browser else {
+        // --window N: the Nth window's browser, oldest first; the first
+        // window's otherwise.
+        let picked = (request["window"] as? Int).flatMap { n in Browsers.all.indices.contains(n - 1) ? Browsers.all[n - 1] : nil }
+        let live = browser.flatMap { b in Browsers.all.contains { $0 === b } ? b : nil }
+        guard let browser = picked ?? live ?? Browsers.primary else {
             answer(["error": "no browser"])
             return
         }
@@ -435,6 +439,50 @@ final class Bench {
                 }
             }
 
+        case "quit":
+            // ⌘Q, on a test run: the app ends the way it does for you, the
+            // session and windows.json written on the way out.
+            guard Store.testing else { answer(["error": "quit only works on a --test run"]); return }
+            answer(["quitting": true])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
+
+        case "windows":
+            // The windows, oldest first, and what the tests do to them. Only
+            // on a SEARCH_PROBE run: it opens and closes windows.
+            guard Store.testing else { answer(["error": "windows only works on a --test run"]); return }
+            let n = (request["n"] as? Int).map { $0 - 1 }
+            switch request["action"] as? String {
+            case "new": Browsers.newWindow()
+            case "close":
+                guard let n, Browsers.all.indices.contains(n) else { answer(["error": "no window \((n ?? -1) + 1)"]); return }
+                Browsers.all[n].window?.close()
+            case "reopen": _ = Browsers.reopenWindow()
+            case "front":
+                // The Nth window as if it had come to the front; a hidden
+                // probe's windows never become key on their own.
+                guard let n, Browsers.all.indices.contains(n) else { answer(["error": "no window \((n ?? -1) + 1)"]); return }
+                Browsers.becameKey(Browsers.all[n])
+            case "link":
+                // A link from another app, the way macOS hands it over.
+                guard let text = request["url"] as? String, let url = URL(string: text) else { answer(["error": "link needs a url"]); return }
+                Links.arrived(url)
+            case "frame":
+                guard let n, Browsers.all.indices.contains(n), let f = request["frame"] as? [Double], f.count == 4 else { answer(["error": "frame needs N X Y W H"]); return }
+                Browsers.all[n].window?.setFrame(NSRect(x: f[0], y: f[1], width: f[2], height: f[3]), display: false)
+            default: break
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                answer(["windows": Browsers.all.enumerated().map { index, b -> [String: Any] in
+                    [
+                        "n": index + 1, "front": b === Browsers.front, "scene": b.inScene,
+                        "shown": b.window?.isVisible ?? false, "files": b.usesFiles,
+                        "space": b.space.name, "tabs": b.tabs.map { $0.address?.absoluteString ?? "" },
+                        "pins": b.tabs.filter { $0.pin != nil }.map { $0.pin ?? "" },
+                        "frame": b.window.map { NSStringFromRect($0.frame) } ?? "",
+                    ]
+                }, "closedWindows": Browsers.lastClosedAt != nil])
+            }
+
         case "middle":
             // The middle button pressed and let go at X Y of a tab's page (its
             // own points from the top left), handed to its view as AppKit
@@ -505,8 +553,8 @@ final class Bench {
                     "number": window.windowNumber,
                 ]
             }
-            if let window = Links.window { out["lights"] = Bench.lights(of: window) }
-            if let tab = browser.active, let web = tab.built, let window = Links.window, web.window === window {
+            if let window = browser.window ?? Links.window { out["lights"] = Bench.lights(of: window) }
+            if let tab = browser.active, let web = tab.built, let window = browser.window ?? Links.window, web.window === window {
                 let frame = web.convert(web.bounds, to: nil)
                 out["activePageFrame"] = [
                     Int(frame.minX), Int(window.frame.height - frame.maxY),
@@ -574,7 +622,7 @@ final class Bench {
                 guard let event = NSEvent.keyEvent(
                     with: type, location: .zero, modifierFlags: flags,
                     timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: Links.window?.windowNumber ?? 0, context: nil,
+                    windowNumber: (browser.window ?? Links.window)?.windowNumber ?? 0, context: nil,
                     characters: chars, charactersIgnoringModifiers: chars,
                     isARepeat: repeats && type == .keyDown, keyCode: UInt16(code)
                 ) else { continue }
@@ -628,7 +676,7 @@ final class Bench {
                 answer(["error": "resize only works on a --test run — it would move your window"])
                 return
             }
-            guard let window = Links.window,
+            guard let window = browser.window ?? Links.window,
                   let width = request["width"] as? Double, let height = request["height"] as? Double
             else { answer(["error": "resize needs a width and a height"]); return }
             let steps = max(1, request["steps"] as? Int ?? 12)
@@ -655,7 +703,7 @@ final class Bench {
             // AppKit would carry the window off on a drag from there — the
             // question behind a tab that moved the window instead of itself.
             // Only looked at, unless asked for a double-click.
-            guard let window = Links.window, let x = request["x"] as? Double, let y = request["y"] as? Double,
+            guard let window = browser.window ?? Links.window, let x = request["x"] as? Double, let y = request["y"] as? Double,
                   let frame = window.contentView?.superview
             else { answer(["error": "hit needs an x and a y"]); return }
             let point = NSPoint(x: x, y: Double(window.frame.height) - y)
@@ -728,7 +776,7 @@ final class Bench {
             let pieces = request["type"] as? Bool == true ? text.map(String.init) : [text]
             if browser.fieldShowing { browser.askFocus() } else { browser.edit() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                guard let field = Bench.addressField(in: Links.window?.contentView),
+                guard let field = Bench.addressField(in: (browser.window ?? Links.window)?.contentView),
                       let editor = field.currentEditor() as? NSTextView
                 else { answer(["error": "the address field has no editor"]); return }
                 var times: [[Double]] = []
@@ -918,7 +966,7 @@ final class Bench {
             ) else { answer(["error": "no event"]); return }
             let before = (finding: browser.finding, summoning: browser.editing, folded: browser.folded)
             var firstPass = "search"
-            if ContentView.keyHook?(event) != nil {
+            if ContentView.keyHooks[ObjectIdentifier(browser)]?(event) != nil {
                 firstPass = "page"
                 _ = web.performKeyEquivalent(with: event)
             }
@@ -1054,7 +1102,7 @@ final class Bench {
             // The browser's window, when a probe started hidden came up
             // without one: the Window menu's own item for it.
             guard Store.testing else { answer(["error": "window only works on a --test run"]); return }
-            if Links.window?.contentView != nil, NSApp.windows.contains(where: { $0 === Links.window }) {
+            if (browser.window ?? Links.window)?.contentView != nil, NSApp.windows.contains(where: { $0 === (browser.window ?? Links.window) }) {
                 answer(["window": "there"])
                 return
             }
@@ -1074,7 +1122,7 @@ final class Bench {
             // once its windows are all off the screen — the browser's own put
             // away, the bench's room far off every screen. Anything of the
             // app's that would show on a screen and the app is hidden again.
-            guard Store.testing, let window = Links.window else { answer(["error": "pages only works on a --test run"]); return }
+            guard Store.testing, let window = browser.window ?? Links.window else { answer(["error": "pages only works on a --test run"]); return }
             func onScreen(_ w: NSWindow) -> Bool { NSScreen.screens.contains { $0.frame.intersects(w.frame) } }
             if request["on"] as? Bool == true {
                 _ = room ?? makeRoom()
@@ -1100,7 +1148,7 @@ final class Bench {
             // started hidden, so nothing shows on anybody's screen. For the
             // images on the site.
             guard Store.testing else { answer(["error": "picture only works on a --test run"]); return }
-            guard let window = Links.window, let frame = window.contentView?.superview,
+            guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "picture needs a path"]); return }
             func pages(in view: NSView) -> [WKWebView] {
@@ -1226,7 +1274,7 @@ final class Bench {
             // The lights' own slide is a Core Animation one, which a drawing
             // doesn't show: where they are is reported beside each frame.
             guard Store.testing else { answer(["error": "film only works on a --test run"]); return }
-            guard let window = Links.window, let frame = window.contentView?.superview,
+            guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "film needs something to do and a path"]); return }
             let count = min(60, max(1, request["frames"] as? Int ?? 14))
@@ -1536,7 +1584,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "pull", "space", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file",
             ]])
         }
     }

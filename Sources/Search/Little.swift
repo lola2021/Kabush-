@@ -84,12 +84,13 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     /// Into the browser's row, after the tab on screen (never among the
     /// pins), and in front; the small window goes.
     func keep() {
-        guard let browser else { return }
+        // Into the window in front, whichever that is now.
+        guard let browser = Browsers.front ?? browser else { return }
         kept = true
         browser.insert(tab, at: browser.placeForNew())
         browser.select(tab)
         window.close()
-        (Links.window ?? NSApp.windows.first { $0.contentView != nil && !($0 is NSPanel) && $0 !== window })?
+        (browser.window ?? NSApp.windows.first { $0.contentView != nil && !($0 is NSPanel) && $0 !== window })?
             .makeKeyAndOrderFront(nil)
     }
 

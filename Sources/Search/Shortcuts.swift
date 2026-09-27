@@ -137,6 +137,7 @@ struct Command: Identifiable {
         Command("app.welcome", "Welcome…", .app, nil) { $0.welcoming = true },
         Command("app.passwords", "Passwords…", .app, KeyCombo("l", option: true)) { $0.managing = true },
 
+        Command("file.newWindow", "New Window", .file, KeyCombo("n")) { _ in Browsers.newWindow() },
         Command("file.newTab", "New Tab", .file, KeyCombo("t")) { $0.newTab() },
         Command("file.newPrivateTab", "New Private Tab", .file, KeyCombo("n", shift: true)) { $0.newShyTab() },
         Command("file.reopen", "Reopen Closed Tab", .file, KeyCombo("t", shift: true)) { $0.reopen() },

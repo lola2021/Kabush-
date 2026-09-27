@@ -6,12 +6,16 @@ import AppKit
 
 @main
 struct SearchApp: App {
-    @StateObject private var browser = Browser()
+    /// The window in front's browser, for the menus (see Windows.swift).
+    @StateObject private var front = Front.shared
     /// Your own keys (Settings › Shortcuts): the menus are drawn again when
     /// one changes, and show it.
     @ObservedObject private var shortcuts = ShortcutStore.shared
     /// Links from other apps, and the Dock icon.
     @NSApplicationDelegateAdaptor(Links.self) private var links
+
+    /// What the menus act on: the window in front's browser.
+    private var browser: Browser { front.browser ?? SceneSlot.shared.browser }
 
     var body: some Scene {
         // Where you left it, at the size you left it. SwiftUI saves a
@@ -21,23 +25,26 @@ struct SearchApp: App {
         // frame has always been kept under. A test run keeps its own: the
         // name lives in the app's standard defaults, which every copy
         // shares, and a probe resized for a test once changed the size the
-        // real window came back at.
-        Window("Search", id: Store.world.map { "search (\($0))" } ?? "search") {
-            ContentView(browser: browser)
+        // real window came back at. The other windows' frames are in
+        // windows.json (see Windows.swift).
+        Window("Search", id: Browsers.sceneID) {
+            SceneRoot(slot: SceneSlot.shared)
                 .frame(minWidth: 640, minHeight: 420)
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 780)
         .commands {
-            // One window. Tabs are the only kind of "new" there is.
             CommandGroup(replacing: .newItem) {
+                // Another window, with tabs of its own (see Windows.swift).
+                Button("New Window") { Browsers.newWindow() }
+                    .shortcut("file.newWindow")
                 Button("New Tab") { browser.newTab() }
                     .shortcut("file.newTab")
                 Button("New Private Tab") { browser.newShyTab() }
                     .shortcut("file.newPrivateTab")
                 Button("Reopen Closed Tab") { browser.reopen() }
                     .shortcut("file.reopen")
-                    .disabled(browser.ghosts.isEmpty)
+                    .disabled(browser.ghosts.isEmpty && Browsers.lastClosedAt == nil)
                 Divider()
                 Button("Open Address…") { browser.edit() }
                     .shortcut("file.openAddress")
@@ -545,7 +552,7 @@ struct ContentView: View {
                 browser.appLeft()
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-                if let window, (note.object as? NSWindow) === window { Browser.front = browser }
+                if let window, (note.object as? NSWindow) === window { Browsers.becameKey(browser) }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { browser.tabSwitcher.cancel() }
@@ -576,6 +583,7 @@ struct ContentView: View {
             // Addresses from other apps have somewhere to go from here on.
             Links.hand(to: browser)
             BookmarkMenu.shared.start(for: browser)
+            Browsers.watchFrames()
         }
     }
 
@@ -765,7 +773,8 @@ struct ContentView: View {
     }
 
     private func dress(_ window: NSWindow) {
-        Links.window = window
+        browser.window = window
+        window.tabbingMode = .disallowed
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.
         window.titlebarAppearsTransparent = true
@@ -816,6 +825,11 @@ struct ContentView: View {
     private func watchKeys() {
         guard keys == nil else { return }
         keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            // Every window has a monitor, and every monitor hears every key:
+            // each takes only its own window's, and the one in front takes
+            // those of windows that aren't a browser's (a panel, the little
+            // window).
+            guard mine(event) else { return event }
             guard event.type == .keyDown else {
                 // ⌃ let go of switches to the tab the switcher is on.
                 if browser.tabSwitcher.active, !event.modifierFlags.contains(.control) {
@@ -827,12 +841,18 @@ struct ContentView: View {
             }
             return take(event) ? nil : event
         }
-        ContentView.keyHook = { event in take(event) ? nil : event }
+        ContentView.keyHooks[ObjectIdentifier(browser)] = { event in take(event) ? nil : event }
+    }
+
+    /// Whether a key is this window's to act on.
+    private func mine(_ event: NSEvent) -> Bool {
+        if let window = event.window, Browsers.browser(for: window) != nil { return window === self.window }
+        return Browsers.acting === browser
     }
 
     /// The same handling the key monitor gives an event, for the bench to
-    /// put a key through the app's own path.
-    static var keyHook: ((NSEvent) -> NSEvent?)?
+    /// put a key through the app's own path — each window's own.
+    static var keyHooks: [ObjectIdentifier: (NSEvent) -> NSEvent?] = [:]
 
     /// The last key handed to the page before Search acted on it (see
     /// `pageFirst`): if WebKit sends it back unused, it is Search's.
@@ -1202,5 +1222,17 @@ private struct UpdateMenuItem: View {
             Button("Check for Updates…") { updater.checkByHand() }
                 .disabled(updater.checking)
         }
+    }
+}
+
+/// SwiftUI's window, around whichever browser it holds now (see SceneSlot):
+/// a fresh one, laid out afresh, when the old one went with its window.
+struct SceneRoot: View {
+    @ObservedObject var slot: SceneSlot
+
+    var body: some View {
+        ContentView(browser: slot.browser)
+            .id(ObjectIdentifier(slot.browser))
+            .onAppear { Browsers.restoreOnce() }
     }
 }

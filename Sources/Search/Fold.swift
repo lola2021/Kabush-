@@ -323,7 +323,7 @@ struct Fold: View {
     /// circles drawn over them while the app is behind (see RestingLights),
     /// so hiding it hides both, and hidden buttons take no clicks.
     private func hideLights() {
-        guard let bar = Fold.titlebar else { return }
+        guard let bar = browser.window?.standardWindowButton(.closeButton)?.superview else { return }
         if prefs.sidebar {
             Fold.slide(bar, off: lightsOff, by: prefs.sideWidth, right: onRight)
         } else {
@@ -331,6 +331,7 @@ struct Fold: View {
         }
     }
 
+    /// The window in front's title bar, for the bench.
     static var titlebar: NSView? {
         Links.window?.standardWindowButton(.closeButton)?.superview
     }

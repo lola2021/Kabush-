@@ -13,6 +13,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Several windows: ⌘N, or New Window in the Dock icon's menu, opens another window with tabs of its own, in the space of the window you're in; each window shows its own space. Menus and shortcuts act on the window in front, and a link from another app opens there. Closing a window while others stay open closes its tabs, and ⇧⌘T brings the whole window back; closing the last one leaves Search running, as Safari does, and the Dock icon, ⌘N or a link brings it back with its tabs ([#327](https://github.com/driceroland/Search/issues/327)). Every window comes back after quitting, where it was.
 - A search in the address field's suggestions wears the search engine's own icon in place of the magnifying glass when this Mac already has it, from a visit to the site. Nothing is fetched for it; an engine whose icon isn't known keeps the glass. Thanks [@merttopuz](https://github.com/merttopuz) ([#364](https://github.com/driceroland/Search/pull/364))
 - Videos can wait for a click, as with Safari's Never Auto-Play: they don't start by themselves, even without sound. Off unless you turn it on in Settings › General › Videos wait for a click; tabs already open follow once closed and opened again, or after they've slept.
 - New tabs can open at the top of the sidebar, under the pinned ones, instead of the bottom — ⌘T's and links opened beside the page alike. Off unless you turn it on in Settings › Tabs › New tabs at the top.

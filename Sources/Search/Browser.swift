@@ -863,6 +863,8 @@ final class Browser: NSObject, ObservableObject {
         let title: String
         let index: Int
         let groupID: UUID?
+        /// When it was closed, to weigh against a window closed since.
+        var at = Date()
 
         var label: String { title.isEmpty ? Address.pretty(url) : title }
     }
@@ -906,22 +908,65 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - beginning and ending
 
-    override init() {
+    /// In SwiftUI's own window rather than one made for it (see Windows.swift).
+    var inScene = false
+    /// Its window, once it has one.
+    weak var window: NSWindow? {
+        didSet { if window != nil { shut = false } }
+    }
+    /// Its window closed and kept: the last one, closed with the app running.
+    var shut = false
+    /// Its window is there to be seen — on screen, or behind a hidden app.
+    var isOpen: Bool { window != nil && !shut }
+    /// Its saved state, for a window other than the oldest (see Windows.swift).
+    var record = WindowRecord()
+    /// Whether its rows are the session files' — the oldest window's — or
+    /// its own line in windows.json.
+    private(set) var usesFiles = false
+    /// The first browser does what is done once for the app.
+    private static var booted = false
+
+    /// The first window: yesterday's tabs, from the session files.
+    override convenience init() { self.init(record: nil) }
+
+    /// `record`: another window's, from windows.json or ⇧⌘T, or a new
+    /// window's, empty.
+    init(record: WindowRecord?) {
         super.init()
-        Shield.shared.enabled = prefs.shielded
-        Shield.shared.compile()
-        if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
-        if prefs.bench {
-            Bench.shared.start(for: self)
-        } else if prefs.benchRefused {
-            announce("“Let a script drive Search” was turned on outside Settings, and stays off")
+        let first = !Browser.booted
+        Browser.booted = true
+        usesFiles = record == nil
+        if first {
+            Shield.shared.enabled = prefs.shielded
+            Shield.shared.compile()
+            if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
+            if prefs.bench {
+                Bench.shared.start(for: self)
+            } else if prefs.benchRefused {
+                announce("“Let a script drive Search” was turned on outside Settings, and stays off")
+            }
+            welcoming = !prefs.welcomed
+            // Once a day, quietly: is there a newer one?
+            Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
+            FormRelay.passkeysOffered = prefs.passkeys
+            // An icon that arrives is put on every tab showing that site, in
+            // every window, not only the one that happened to ask for it.
+            Favicons.shared.arrived = { host, image in
+                let lower = host.lowercased()
+                for browser in Browsers.all {
+                    for tab in browser.tabs + browser.parkedTabs {
+                        guard let tabHost = tab.address?.host()?.lowercased() else { continue }
+                        if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
+                            tab.icon = image
+                        }
+                    }
+                }
+            }
+            // What a deleted space left behind, if WebKit wouldn't let it go then.
+            Spaces.sweep()
         }
-        welcoming = !prefs.welcomed
         // Asked to stay out of the way: it starts that way (see Fold.swift).
         folded = prefs.sidebar && prefs.sideHides
-        // Once a day, quietly: is there a newer one?
-        Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
-        FormRelay.passkeysOffered = prefs.passkeys
 
         // The History menu lists what the history holds, and the menu is drawn
         // from this object's changes — so the history's are passed on.
@@ -932,19 +977,43 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
 
-        // An icon that arrives is put on every tab showing that site, not only
-        // the one that happened to ask for it.
-        Favicons.shared.arrived = { [weak self] host, image in
-            guard let self else { return }
-            let lower = host.lowercased()
-            for tab in tabs + parkedTabs {
-                guard let tabHost = tab.address?.host()?.lowercased() else { continue }
-                if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
-                    tab.icon = image
-                }
+        // The spaces are every window's: one renamed, added or taken away in
+        // another window is so here too.
+        NotificationCenter.default.publisher(for: Spaces.changed)
+            .sink { [weak self] note in
+                guard let self, let list = note.object as? [Space], list != spaces else { return }
+                spaces = list
+                if !list.contains(where: { $0.id == self.spaceID }) { switchSpace(to: Space.firstID) }
             }
+            .store(in: &bag)
+
+        // Yesterday's tabs, or one empty one. Either way a web view is built
+        // now, which starts a content process while the window is still being
+        // drawn — so the first address you type navigates instead of waiting
+        // for WebKit to get up.
+        defer {
+            follow()
+            watchForSleep()
         }
-        // The little window's own three buttons.
+
+        Spaces.sharing = Set(spaces.filter { $0.sharesSignIns == true }.map(\.id))
+        if let record {
+            // Another window: the space it showed, and its own rows.
+            self.record = record
+            if prefs.usesSpaces, spaces.contains(where: { $0.id == record.space }) { spaceID = record.space }
+        } else if prefs.usesSpaces, let last = Store.settings.string(forKey: "space.current").flatMap(UUID.init),
+           spaces.contains(where: { $0.id == last }) {
+            // The space you were in, when there are spaces (see Spaces.swift).
+            spaceID = last
+            Spaces.current = last
+        }
+        restoreSession()
+        if prefs.usesSpaces { preloadSpaces() }
+    }
+
+    /// The floating video's buttons answer the window whose video it is:
+    /// set as it comes out of one (see lift).
+    private func ownFloater() {
         floater.onReturn = { [weak self] in
             guard let self else { return }
             // The window closes first, and unconditionally. Hanging that on
@@ -987,32 +1056,11 @@ final class Browser: NSObject, ObservableObject {
             }
         }
         floater.onClose = { [weak self] in self?.land() }
-
-        // Yesterday's tabs, or one empty one. Either way a web view is built
-        // now, which starts a content process while the window is still being
-        // drawn — so the first address you type navigates instead of waiting
-        // for WebKit to get up.
-        defer {
-            follow()
-            watchForSleep()
-        }
-
-        // What a deleted space left behind, if WebKit wouldn't let it go then.
-        Spaces.sweep()
-        Spaces.sharing = Set(spaces.filter { $0.sharesSignIns == true }.map(\.id))
-        // The space you were in, when there are spaces (see Spaces.swift).
-        if prefs.usesSpaces, let last = Store.settings.string(forKey: "space.current").flatMap(UUID.init),
-           spaces.contains(where: { $0.id == last }) {
-            spaceID = last
-            Spaces.current = last
-        }
-        restoreSession()
-        if prefs.usesSpaces { preloadSpaces() }
     }
 
     /// The row of tabs the space on screen had last time, or one empty tab.
     func restoreSession() {
-        let saved = Session.read(space: spaceID)
+        let saved = readRow(spaceID)
         tabGroups = (saved.groups ?? []).filter { group in
             saved.tabs.contains { $0.groupID == group.id }
         }
@@ -1022,7 +1070,7 @@ final class Browser: NSObject, ObservableObject {
             // moment after the window is up, so that the first address typed
             // finds everything already running, and the first frame never
             // had to share the CPU with it.
-            let tab = Tab()
+            let tab = Tab(configuration: Web.configuration(space: spaceID))
             adopt(tab)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak tab] in
                 guard let tab, tab.isBlank else { return }
@@ -1035,7 +1083,7 @@ final class Browser: NSObject, ObservableObject {
         var row: [Tab] = []
         for entry in saved.tabs {
             guard let url = URL(string: entry.url) else { continue }
-            let tab = Tab()
+            let tab = Tab(configuration: Web.configuration(space: spaceID))
             prepare(tab)
             tab.restore(url: url, title: entry.title, name: entry.name)
             tab.pin = entry.pin
@@ -1045,7 +1093,7 @@ final class Browser: NSObject, ObservableObject {
             row.append(tab)
         }
         guard !row.isEmpty else {
-            adopt(Tab())
+            adopt(Tab(configuration: Web.configuration(space: spaceID)))
             return
         }
         let first = row[min(max(0, saved.active), row.count - 1)]
@@ -1217,7 +1265,63 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func writeSession(now: Bool = false) {
-        Session.write(now: now, space: spaceID, session(tabs, active: activeID, groups: tabGroups))
+        writeRow(spaceID, session(tabs, active: activeID, groups: tabGroups), now: now)
+    }
+
+    // MARK: - this window's rows, wherever they are kept
+
+    /// A space's row as saved: the session files' for the oldest window,
+    /// this window's own record for any other.
+    func readRow(_ space: UUID) -> Session.Shape {
+        usesFiles ? Session.read(space: space) : (record.rows[space.uuidString] ?? Session.Shape(tabs: [], active: 0))
+    }
+
+    func writeRow(_ space: UUID, _ shape: Session.Shape, now: Bool) {
+        if usesFiles {
+            Session.write(now: now, space: space, shape)
+        } else {
+            record.rows[space.uuidString] = shape
+            if now { Browsers.save(now: true) } else { Browsers.saveSoon() }
+        }
+    }
+
+    /// Every row this window has, by space: the one on screen, the parked
+    /// ones, and those saved but not brought up this time.
+    func allRows() -> [String: Session.Shape] {
+        var rows: [String: Session.Shape] = [:]
+        for space in spaces {
+            let saved = readRow(space.id)
+            if !saved.tabs.isEmpty { rows[space.id.uuidString] = saved }
+        }
+        rows[spaceID.uuidString] = session(tabs, active: activeID, groups: tabGroups)
+        for (space, row) in parked {
+            rows[space.uuidString] = session(row.tabs, active: row.active, groups: readRow(space).groups)
+        }
+        return rows
+    }
+
+    /// The oldest window closed: this one is the oldest now, and its rows go
+    /// into the session files, every space's — an empty row where it has
+    /// none, or the closed window's would come back there.
+    func becomePrimary() {
+        let rows = allRows()
+        usesFiles = true
+        for space in spaces {
+            Session.write(now: true, space: space.id, rows[space.id.uuidString] ?? Session.Shape(tabs: [], active: 0))
+        }
+        record.rows = [:]
+        Store.settings.set(spaceID.uuidString, forKey: "space.current")
+        // SwiftUI's window, opened next launch, comes back where this one is.
+        window?.saveFrame(usingName: Browsers.sceneID)
+    }
+
+    /// Its window closed for good, with others open: every page let go.
+    func closeAll() {
+        if floating != nil { land() }
+        if peekTab != nil { closePeek() }
+        for tab in tabs + parkedTabs { tab.close() }
+        parked = [:]
+        tabs = []
     }
 
     private func session(_ tabs: [Tab], active id: Tab.ID?, groups: [TabGroup]? = nil) -> Session.Shape {
@@ -1253,8 +1357,8 @@ final class Browser: NSObject, ObservableObject {
     /// only place a space off screen keeps them: written without them, the
     /// space would lose every group it had.
     private func writeSession(now: Bool, space: UUID, row: Parked) {
-        let groups = Session.read(space: space).groups
-        Session.write(now: now, space: space, session(row.tabs, active: row.active, groups: groups))
+        let groups = readRow(space).groups
+        writeRow(space, session(row.tabs, active: row.active, groups: groups), now: now)
     }
 
     private func rememberSession() {
@@ -1308,7 +1412,7 @@ final class Browser: NSObject, ObservableObject {
             rememberSession()
             return
         }
-        let tab = Tab()
+        let tab = Tab(configuration: Web.configuration(space: spaceID))
         adopt(tab)
         if onTop { move(tab, to: placeForBlank) }
         leaving()
@@ -1401,7 +1505,7 @@ final class Browser: NSObject, ObservableObject {
             if tab.isBlank {
                 NSApp.keyWindow?.performClose(nil)
             } else {
-                let fresh = Tab()
+                let fresh = Tab(configuration: Web.configuration(space: spaceID))
                 remember(tab, at: 0)
                 tab.close()
                 adopt(fresh)
@@ -1461,6 +1565,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌘⇧T. Back into the row at the place it left.
     func reopen() {
+        // A window closed after the last tab was: the window comes back, as
+        // in Safari and Chrome (see Windows.swift).
+        if let window = Browsers.lastClosedAt, window > (ghosts.last?.at ?? .distantPast), Browsers.reopenWindow() { return }
         guard let ghost = ghosts.last else { return }
         reopen(ghost)
     }
@@ -1468,7 +1575,7 @@ final class Browser: NSObject, ObservableObject {
     /// One of them by name, from the History menu.
     func reopen(_ ghost: Ghost) {
         ghosts.removeAll { $0.id == ghost.id }
-        let tab = Tab()
+        let tab = Tab(configuration: Web.configuration(space: spaceID))
         prepare(tab)
         tab.groupID = prefs.usesTabGroups && tabGroups.contains(where: { $0.id == ghost.groupID })
             ? ghost.groupID : nil
@@ -1929,7 +2036,7 @@ final class Browser: NSObject, ObservableObject {
     /// on screen: tabs with an address and no page yet, which cost next to
     /// nothing until one is looked at (see Spaces.swift).
     func loadRow(_ space: UUID) -> Parked {
-        let saved = Session.read(space: space)
+        let saved = readRow(space)
         let savedGroups = saved.groups ?? []
         var row: [Tab] = []
         for entry in saved.tabs {
@@ -1995,12 +2102,8 @@ final class Browser: NSObject, ObservableObject {
     /// comes back.
     private var liftedAway = false
 
-    /// The window last in front. Asked once the app has gone to the back,
-    /// macOS no longer says which window was main.
-    static weak var front: Browser?
-
     func appLeft() {
-        guard prefs.floatsAway, Browser.front == nil || Browser.front === self else { return }
+        guard prefs.floatsAway, Browsers.front == nil || Browsers.front === self else { return }
         liftedAway = !floater.showing
         lift(active, quietly: true)
     }
@@ -2039,6 +2142,7 @@ final class Browser: NSObject, ObservableObject {
                 }
                 self.floating = tab.id
                 tab.floating = true
+                self.ownFloater()
                 self.floater.lift(tab.web)
             }
         }
@@ -2047,6 +2151,10 @@ final class Browser: NSObject, ObservableObject {
     /// Back into its tab. The stage takes the page again on its next layout,
     /// which is what the self-healing there is for.
     func land() {
+        // Another window's video: that window takes it back.
+        if floating == nil, let owner = Browsers.all.first(where: { $0 !== self && $0.floating != nil }) {
+            return owner.land()
+        }
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }
