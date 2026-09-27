@@ -688,6 +688,8 @@ final class Browser: NSObject, ObservableObject {
     var pinnedCount: Int { tabs.filter { $0.pin != nil }.count }
 
     func pin(_ tab: Tab) {
+        // Drawn again even when the tab stays where it is (see unpin).
+        objectWillChange.send()
         // Pins are the space's, kept on disk and shown in every window: a
         // private tab can't be one, or its page would outlive it there.
         guard !tab.shy else { return }
@@ -766,6 +768,12 @@ final class Browser: NSObject, ObservableObject {
 
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
+        // The row is drawn again whether or not the tab moves. Unpinning the
+        // only tab, or the last pin, leaves it where it is; `tabs` didn't
+        // change, only the tab did, and the column went on drawing it as a
+        // pinned square — with no letter left, an empty tile — and never as
+        // a row (from X).
+        objectWillChange.send()
         tab.pin = nil
         tab.home = nil
         tab.pinID = nil
@@ -1370,6 +1378,8 @@ final class Browser: NSObject, ObservableObject {
     /// Another window changed a space's pins: this window's row there follows.
     func pinsChanged(in space: UUID) {
         if space == spaceID {
+            // Drawn again even when only a pin's letter or name changed.
+            objectWillChange.send()
             let row = reconcilePins(tabs, space: space)
             if row.map(\.id) != tabs.map(\.id) { tabs = row }
             if !tabs.contains(where: { $0.id == activeID }) {
