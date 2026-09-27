@@ -669,6 +669,7 @@ final class Bench {
             case .denied: out["passkeyAccess"] = "denied"
             default: out["passkeyAccess"] = "notDetermined"
             }
+            out["dialogs"] = Dialogs.askedInTest
             out["asking"] = browser.asking.map { "\($0.host) \($0.wants)" + ($0.once ? " once" : "") + ($0.keeps ? "" : " unkept") } ?? ""
             out["locationAnswered"] = Browser.locationAnswered ?? ""
             out["passkeyAsks"] = Passkeys.asked

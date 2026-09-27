@@ -441,6 +441,7 @@ final class Extensions: NSObject, ObservableObject {
                 context.setPermissionStatus(.grantedExplicitly, for: own)
             }
             Extensions.fence(context)
+            Extensions.watchTouches()
             try controller.load(context)
             watch(context)
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
@@ -903,6 +904,14 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
+    /// Its manifest asks to talk to apps on this Mac ("nativeMessaging"),
+    /// required or optional, which WebKit's own grant — given to all, see
+    /// `load` — doesn't say.
+    static func asksForNative(_ context: WKWebExtensionContext) -> Bool {
+        context.webExtension.requestedPermissions.contains(.nativeMessaging)
+            || context.webExtension.optionalPermissions.contains(.nativeMessaging)
+    }
+
     /// Whether this address is a page of an extension other than the one
     /// asking — which it never gets to see into.
     static func othersPage(_ url: URL?, for context: WKWebExtensionContext) -> Bool {
@@ -920,7 +929,7 @@ final class Extensions: NSObject, ObservableObject {
         ("privacy", "Change your privacy settings"), ("browsingData", "Clear your browsing data"),
         ("management", "See your other extensions"), ("notifications", "Show notifications"),
         ("sessions", "See your recently closed tabs"), ("topSites", "See your most visited sites"),
-        ("readingList", "Read and change your reading list"),
+        ("readingList", "Read and change your reading list"), ("downloads.open", "Open files it downloads"),
     ]
 
     /// What an extension wants, in words.
@@ -1051,6 +1060,34 @@ final class Extensions: NSObject, ObservableObject {
     /// for, even once WebKit no longer sees the click (see
     /// ExtensionShims, "permissions.afterClick").
     static var clicked: [String: Date] = [:]
+
+    /// When you last clicked or typed in one of each extension's own pages —
+    /// its popup, or a page of its in a tab. Real events only: a page's
+    /// script can dispatch one, but it never reaches here.
+    static var touched: [String: Date] = [:]
+    private static var touching: Any?
+
+    static func watchTouches() {
+        guard touching == nil else { return }
+        touching = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .keyDown]) { event in
+            var view: NSView? = event.type == .keyDown
+                ? event.window?.firstResponder as? NSView
+                : event.window?.contentView?.superview?.hitTest(event.locationInWindow)
+            while let found = view, !(found is WKWebView) { view = found.superview }
+            if let url = (view as? WKWebView)?.url, url.scheme?.lowercased() == Extensions.scheme, let id = url.host() {
+                Extensions.touched[id] = Date()
+            }
+            return event
+        }
+    }
+
+    /// You just did something in this extension — its button, its menu
+    /// line, a click or a key in one of its pages — as Chrome's "user
+    /// gesture" means: within the last few seconds.
+    static func justUsed(_ id: String) -> Bool {
+        let latest = [clicked[id], touched[id]].compactMap { $0 }.max()
+        return latest.map { Date().timeIntervalSince($0) < 5 } ?? false
+    }
 
     func press(_ id: String) {
         guard let context = contexts[id], !ExtensionPopup.shared.closes(id) else { return }
@@ -1221,6 +1258,12 @@ extension Extensions: WKWebExtensionControllerDelegate {
             return try await ExtensionShims.answer(message, from: extensionContext, owner: self)
         }
         let id = extensionContext.uniqueIdentifier, host = applicationIdentifier!
+        // WebKit's nativeMessaging is granted to every extension, for the
+        // line to Search above; an app on this Mac only to one whose
+        // manifest asks for it, as in Chrome.
+        guard Extensions.asksForNative(extensionContext) else {
+            throw ExtensionNative.Refused(why: "Access to native messaging requires the nativeMessaging permission.")
+        }
         do {
             return try await ExtensionNative.send(message, to: host, from: id)
         } catch {
@@ -1242,6 +1285,9 @@ extension Extensions: WKWebExtensionControllerDelegate {
         // The port a worker's shim opens only to find what ports share; it
         // lets go at once.
         if port.applicationIdentifier == ExtensionShims.application { return }
+        guard Extensions.asksForNative(extensionContext) else {
+            throw ExtensionNative.Refused(why: "Access to native messaging requires the nativeMessaging permission.")
+        }
         try ExtensionNative.connect(port, from: extensionContext.uniqueIdentifier)
     }
 }

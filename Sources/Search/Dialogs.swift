@@ -297,11 +297,23 @@ enum Dialogs {
         webView.window ?? NSApp.mainWindow ?? NSApp.windows.first { $0.contentView != nil && $0.isVisible }
     }
 
+    /// A test run's questions, in the order they would have been shown.
+    static var askedInTest: [String] = []
+
     static func show(
         _ alert: NSAlert,
         over webView: WKWebView,
         then finish: @escaping (NSApplication.ModalResponse) -> Void
     ) {
+        // A test run never shows one — a sheet, or a window of its own for a
+        // page without one, would be on the screen of whoever is working
+        // beside it. What it would have asked is written down (bench probe),
+        // and it is answered as if cancelled.
+        if Store.testing {
+            askedInTest.append(alert.messageText)
+            finish(.cancel)
+            return
+        }
         if let window = window(for: webView) {
             alert.beginSheetModal(for: window, completionHandler: finish)
         } else {

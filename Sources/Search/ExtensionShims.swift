@@ -3046,6 +3046,11 @@ enum ExtensionShims {
                 guard allowed(id, context: context).contains("downloads.open") else {
                     throw Unsupported(what: "The extension never asked for \u{201C}downloads.open\u{201D}")
                 }
+                // Only when you have just done something in it, as Chrome
+                // asks: never on its own, from its worker.
+                guard Extensions.justUsed(id) else {
+                    throw Unsupported(what: "downloads.open() may only be called in response to a user gesture.")
+                }
                 guard ExtensionShims.ownDownloads[id]?.contains(keep.path) == true else {
                     throw Unsupported(what: "Only a download this extension started can be opened by it")
                 }
@@ -3815,13 +3820,16 @@ enum ExtensionAuth {
             // Closing the tab is saying no. Moved to another window, or to
             // a space not on screen, it is still there.
             watches[id]?.invalidate()
+            let started = Date()
             watches[id] = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                 MainActor.assumeIsolated {
                     guard let entry = waiting[id], entry.tab == tab.id else {
                         watches.removeValue(forKey: id)?.invalidate()
                         return
                     }
-                    guard !exists(entry.tab) else { return }
+                    // So is ten minutes with nobody finishing: its address is
+                    // no longer watched for.
+                    guard !exists(entry.tab) || Date().timeIntervalSince(started) > 600 else { return }
                     waiting[id] = nil
                     watches.removeValue(forKey: id)?.invalidate()
                     entry.finish(.failure(Declined()))

@@ -509,8 +509,23 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// What a private tab took off its page, kept for that page only.
+    private var passingVeils: [Tab.ID: [String]] = [:]
+
+    private func passingCSS(_ id: Tab.ID) -> String {
+        (passingVeils[id] ?? []).map { "\n\($0) { display: none !important; }" }.joined()
+    }
+
     /// ⌘Z, while pointing: the last thing you took off comes back.
     func undoHiding() {
+        if let tab = active, tab.shy {
+            guard var list = passingVeils[tab.id], !list.isEmpty else { return }
+            list.removeLast()
+            passingVeils[tab.id] = list
+            tab.applyVeils(curtain.css(on: hereHost) + passingCSS(tab.id))
+            announce("It's back")
+            return
+        }
         guard let host = hereHost, let back = curtain.undo(on: host) else { return }
         redress()
         announce("\(back.label) is back")
@@ -3073,6 +3088,14 @@ final class Browser: NSObject, ObservableObject {
         }
         tab.onPick = { [weak self] tab, selector, label, note in
             guard let self, let host = curtain.host(of: tab.address) else { return }
+            // A private tab writes nothing down, hidden.json included: taken
+            // off this page only.
+            if tab.shy {
+                passingVeils[tab.id, default: []].append(selector)
+                tab.applyVeils(curtain.css(on: host) + passingCSS(tab.id))
+                announce("Hidden on this page — ⌘Z puts it back")
+                return
+            }
             curtain.hide(selector, label: label, note: note, on: host)
             let css = curtain.css(on: host)
             tab.arm(hiding: css)
@@ -3305,7 +3328,15 @@ final class Browser: NSObject, ObservableObject {
     /// and Escape puts it back.
     func edit() {
         summoning = false
-        typed = active?.address?.absoluteString ?? ""
+        // Never a name and password written into the address: they would be
+        // on screen, and in whatever you copy from here.
+        typed = active?.address.map { url -> String in
+            guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), parts.user != nil || parts.password != nil
+            else { return url.absoluteString }
+            parts.user = nil
+            parts.password = nil
+            return parts.string ?? ""
+        } ?? ""
         editing = true
         focusRequest += 1
     }
