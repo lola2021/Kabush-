@@ -1844,8 +1844,15 @@ final class Browser: NSObject, ObservableObject {
     ///
     /// `from`: the tab it was opened out of. A private one's opens private,
     /// in the same store, as a link that asks for a new window already does.
+    ///
+    /// `mayWait`: opened behind the page by hand, or one of a batch of links
+    /// from another app. With Settings › Tabs › Load background tabs when
+    /// you go to them, such a tab keeps its address and loads nothing until
+    /// it is gone to, as a tab brought back from the last session does. A
+    /// tab in front always loads, and so does one an extension opens, which
+    /// may be waiting on its page.
     @discardableResult
-    func open(_ url: URL, foreground: Bool, atEnd: Bool = false, from source: Tab? = nil) -> Tab {
+    func open(_ url: URL, foreground: Bool, atEnd: Bool = false, from source: Tab? = nil, mayWait: Bool = false) -> Tab {
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
@@ -1860,7 +1867,11 @@ final class Browser: NSObject, ObservableObject {
         // are on: turned off, they sleep, and nothing new goes into one.
         if prefs.usesTabGroups, let source, !tab.shy, !tab.bench { tab.groupID = source.groupID }
         tabs.insert(tab, at: atEnd ? tabs.count : placeForNew())
-        tab.go(to: url)
+        if mayWait, !foreground, prefs.lazyTabs, page == nil {
+            tab.restore(url: url, title: "")
+        } else {
+            tab.go(to: url)
+        }
         if foreground {
             leaving()
             activeID = tab.id
@@ -1978,7 +1989,7 @@ final class Browser: NSObject, ObservableObject {
             bookmarksOpen = false
         }
         if inNewTab {
-            open(url, foreground: foreground, from: active)
+            open(url, foreground: foreground, from: active, mayWait: true)
         } else {
             visit(url)
         }
@@ -2201,7 +2212,7 @@ final class Browser: NSObject, ObservableObject {
         // The middle button on a link opens it beside the tab you are on, as
         // it does in every other browser (see MiddleRelay).
         // From a private tab, the new one is private too, as for ⌘-click.
-        tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab) }
+        tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab, mayWait: true) }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
 
         // The caret in a sign-in box: the accounts kept for this site hang
@@ -2609,7 +2620,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if action.navigationType == .linkActivated,
            ["http", "https"].contains(scheme),
            action.modifierFlags.contains(.command) {
-            open(url, foreground: action.modifierFlags.contains(.shift), from: tab(for: webView))
+            open(url, foreground: action.modifierFlags.contains(.shift), from: tab(for: webView), mayWait: true)
             decisionHandler(.cancel)
             return
         }

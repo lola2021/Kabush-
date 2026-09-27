@@ -157,7 +157,7 @@ final class Links: NSObject, NSApplicationDelegate {
             comeForward()
             for (n, url) in early.dropFirst().enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15 * Double(n + 1)) { [weak browser] in
-                    browser?.open(url, foreground: false, atEnd: true)
+                    browser?.open(url, foreground: false, atEnd: true, mayWait: true)
                 }
             }
         }

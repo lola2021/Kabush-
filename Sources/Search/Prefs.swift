@@ -102,6 +102,13 @@ final class Preferences: ObservableObject {
     @Published var sleepsTabs: Bool {
         didSet { store.set(sleepsTabs, forKey: "tabs.sleep") }
     }
+    /// A tab opened behind the page — ⌘-click, the middle button, a batch
+    /// of links from another app — waits to load until it is gone to, as a
+    /// tab brought back from the last session does (see Browser.open).
+    /// Off unless asked for.
+    @Published var lazyTabs: Bool {
+        didSet { store.set(lazyTabs, forKey: "tabs.lazy") }
+    }
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
     }
@@ -307,6 +314,7 @@ final class Preferences: ObservableObject {
         keywords = store.data(forKey: "search.keywords")
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
+        lazyTabs = store.bool(forKey: "tabs.lazy")
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         mruSwitcher = store.bool(forKey: "tabs.mru")
         shielded = store.object(forKey: "shield") as? Bool ?? true
