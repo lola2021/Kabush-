@@ -2262,6 +2262,10 @@ extension Browser: WKDownloadDelegate {
             announce("Download finished")
             return
         }
+        if #available(macOS 15.4, *), let asked = download.originalRequest?.url,
+           let id = ExtensionShims.askedDownloads.removeValue(forKey: asked) {
+            ExtensionShims.ownDownloads[id, default: []].insert(file.path)
+        }
         loot.add(
             Keep(
                 name: file.lastPathComponent,

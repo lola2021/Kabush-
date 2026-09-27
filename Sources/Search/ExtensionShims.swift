@@ -2661,6 +2661,7 @@ enum ExtensionShims {
                 // A name it asks for, which may carry folders: only the last part is kept.
                 browser.namedDownloads[url] = (name as NSString).lastPathComponent
             }
+            ExtensionShims.askedDownloads[url] = id
             let download = await web.startDownload(using: URLRequest(url: url))
             browser.keep(download)
             return browser.loot.kept.count + 1
@@ -2673,7 +2674,19 @@ enum ExtensionShims {
         case "downloads.open", "downloads.show":
             guard let index = first as? Int, browser.loot.kept.indices.contains(index - 1) else { return nil }
             let keep = browser.loot.kept[index - 1]
-            if api == "downloads.open" { browser.loot.open(keep) } else { browser.loot.reveal(keep) }
+            if api == "downloads.open" {
+                // As in Chrome, opening asks for its own permission; and only
+                // a file this extension downloaded itself, not any of yours.
+                guard allowed(id, context: context).contains("downloads.open") else {
+                    throw Unsupported(what: "The extension never asked for \u{201C}downloads.open\u{201D}")
+                }
+                guard ExtensionShims.ownDownloads[id]?.contains(keep.path) == true else {
+                    throw Unsupported(what: "Only a download this extension started can be opened by it")
+                }
+                browser.loot.open(keep)
+            } else {
+                browser.loot.reveal(keep)
+            }
             return nil
         case "downloads.showDefaultFolder":
             NSWorkspace.shared.open(browser.prefs.downloads)
@@ -3159,6 +3172,10 @@ enum ExtensionShims {
 
     /// Popups extensions set for their buttons: per tab, or "*" for all.
     static var popups: [String: [String: String]] = [:]
+    /// Downloads an extension asked for, by address, until they land; then
+    /// the files they became, which are the only ones it may open.
+    static var askedDownloads: [URL: String] = [:]
+    static var ownDownloads: [String: Set<String>] = [:]
 
     /// Keep-awake assertions, one per extension that asked.
     static var awake: [String: IOPMAssertionID] = [:]
