@@ -836,6 +836,7 @@ struct ContentView: View {
                 return true
             }
             if browser.makingSpace {
+                browser.cancelSpaceCreation()
                 withAnimation(Motion.glide) { browser.makingSpace = false }
                 return true
             }
