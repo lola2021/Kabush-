@@ -263,7 +263,9 @@ enum Browsers {
         var records = [record(of: primary, rows: false)]
         records[0].rows = [:]
         for browser in all.dropFirst() { records.append(record(of: browser, rows: true)) }
-        Disk.write(file, now: now) { try? JSONEncoder().encode(records) }
+        // Frozen before it goes to the Disk queue.
+        let snapshot = records
+        Disk.write(file, now: now) { try? JSONEncoder().encode(snapshot) }
     }
 
     /// Soon, not now: a window being dragged moves many times a second.
