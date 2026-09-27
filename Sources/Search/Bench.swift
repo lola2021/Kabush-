@@ -2078,6 +2078,9 @@ final class Bench {
             if let on = request["spaces"] as? Bool { browser.prefs.usesSpaces = on }
             if let on = request["hides"] as? Bool { browser.prefs.sideHides = on }
             if let on = request["folded"] as? Bool { browser.folded = on }
+            // The window's own full screen as the chrome sees it, without
+            // the window going there: a test run never takes the screen.
+            if let on = request["fullscreen"] as? Bool, Store.testing { browser.fullScreen = on }
             if let on = request["peek"] as? Bool { browser.peeking = on }
             // A peek at a link (Peek.swift): its two buttons.
             if let what = request["peeklink"] as? String {

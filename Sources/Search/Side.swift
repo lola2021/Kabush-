@@ -37,6 +37,10 @@ struct SideBar: View {
     private var onRight: Bool { prefs.sidePosition == .right }
     private var innerEdge: Alignment { onRight ? .leading : .trailing }
 
+    /// The window's buttons' corner: gone in full screen, where macOS takes
+    /// them away, and back, forward and reload move up to the edge (idea 184).
+    private var lights: CGFloat { browser.fullScreen ? 0 : Metrics.sideLights }
+
     var body: some View {
         ZStack(alignment: .top) {
             // Not under the card for a new space: it isn't made of views that
@@ -49,7 +53,7 @@ struct SideBar: View {
             // clicks. The lights are the title bar's own and answer first.
             HStack(spacing: 0) {
                 DragStrip()
-                    .frame(width: 10 + Metrics.sideLights)
+                    .frame(width: 10 + lights)
                 Color.clear
                     .frame(width: Metrics.helm)
                     .allowsHitTesting(false)
@@ -63,7 +67,7 @@ struct SideBar: View {
                 // bar, moved beside the lights since there's no far end of a
                 // row to put them at in this mode.
                 HStack(spacing: 0) {
-                    Color.clear.frame(width: Metrics.sideLights)
+                    Color.clear.frame(width: lights)
                     Helm(browser: browser)
                     Spacer(minLength: 0)
                 }

@@ -602,6 +602,12 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { browser.tabSwitcher.cancel() }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window { browser.fullScreen = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { note in
+                if let window, (note.object as? NSWindow) === window { browser.fullScreen = false }
+            }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 resting?.isHidden = true
                 browser.appBack()

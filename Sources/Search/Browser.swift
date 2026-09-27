@@ -1292,6 +1292,9 @@ final class Browser: NSObject, ObservableObject {
     var shut = false
     /// Its window is there to be seen — on screen, or behind a hidden app.
     var isOpen: Bool { window != nil && !shut }
+    /// Its window fills the screen. macOS takes the window's buttons away
+    /// then, so the room kept for them at the top goes too (idea 184).
+    @Published var fullScreen = false
     /// The extension a popup window was opened for (windows.create with
     /// type "popup"), or nil for a browser window. Such a window is small,
     /// the page under a thin line with its site; it is never saved, never

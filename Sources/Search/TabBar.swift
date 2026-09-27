@@ -4,6 +4,10 @@ import SwiftUI
 /// slides from the tab you left to the tab you picked rather than blinking out
 /// of one and into the other.
 struct TabBar: View {
+    /// The room kept at the start for the window's buttons: none to speak of
+    /// in full screen, where macOS takes them away (idea 184).
+    private var lights: CGFloat { browser.fullScreen ? 12 : Metrics.lights }
+
     @ObservedObject var browser: Browser
 
     @Namespace private var pill
@@ -32,11 +36,11 @@ struct TabBar: View {
             ZStack(alignment: .leading) {
                 // The empty half of the strip is what you grab to move the
                 // window; the tabs keep the run they sit on.
-                DragStrip(reserved: Metrics.lights + dot + leading + (making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width)) + Metrics.tabGap + Metrics.plusWidth, trailing: doors + 12, onDoubleClick: browser.newTab)
+                DragStrip(reserved: lights + dot + leading + (making ? min(540, room(in: geo.size.width)) : run(in: geo.size.width)) + Metrics.tabGap + Metrics.plusWidth, trailing: doors + 12, onDoubleClick: browser.newTab)
                 // And the corner the lights sit in, which is title bar too —
                 // the one stretch left to take hold of when tabs fill the row.
                 DragStrip()
-                    .frame(width: Metrics.lights)
+                    .frame(width: lights)
 
                 HStack(spacing: Metrics.tabGap) {
                     // Back, forward and reload by the lights, when asked.
@@ -162,7 +166,7 @@ struct TabBar: View {
                 // The traffic lights are the system's. The row starts after
                 // them and stays there — nothing here moves to get out of
                 // their way, because nothing here was ever in it.
-                .padding(.leading, Metrics.lights)
+                .padding(.leading, lights)
                 .padding(.trailing, 12)
                 .coordinateSpace(name: "strip")
             }
@@ -221,7 +225,7 @@ struct TabBar: View {
             HStack(spacing: Metrics.tabGap) {
                 ForEach(shown) { tab in
                     rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
-                            width: each, room: strip - Metrics.lights - 12,
+                            width: each, room: strip - lights - 12,
                             height: Metrics.strip, interactive: false, pill: pill)
                 }
             }
@@ -256,7 +260,7 @@ struct TabBar: View {
         let itemWidth = isPairRepresentative ? splitItemWidth(base: width(in: strip)) : width(in: strip)
         let step = (tab.pin != nil ? Metrics.pinWidth : itemWidth) + Metrics.tabGap
         return rowItem(tab, in: browser.tabs, splits: browser.splits, activeID: browser.activeID,
-                       width: width(in: strip), room: strip - Metrics.lights - leading - 12,
+                       width: width(in: strip), room: strip - lights - leading - 12,
                        height: Metrics.strip, interactive: true, pill: pill)
             .background {
                 if browser.prefs.splitView && !isPairRepresentative {
@@ -341,7 +345,7 @@ struct TabBar: View {
         if let id = browser.editingTab, let tab = browser.tabs.first(where: { $0.id == id }) {
             let splitWidth = browser.prefs.splitView ? browser.split(for: tab).map { _ in splitItemWidth(base: each) } : nil
             let oldWidth = splitWidth ?? (tab.pin != nil ? Metrics.pinWidth : each)
-            total += min(340, strip - Metrics.lights - leading - 12) - oldWidth
+            total += min(340, strip - lights - leading - 12) - oldWidth
         }
         return total
     }
@@ -352,7 +356,7 @@ struct TabBar: View {
     /// unless the helm leads, when nothing at the far end may be a real zero.
     private func room(in strip: CGFloat) -> CGFloat {
         let far = doors > 0 || browser.prefs.navigationLeft ? doors : Metrics.helm + 26
-        return max(0, strip - Metrics.lights - dot - leading - 12 - Metrics.plusWidth - far - 3 * Metrics.tabGap)
+        return max(0, strip - lights - dot - leading - 12 - Metrics.plusWidth - far - 3 * Metrics.tabGap)
     }
 
     /// What the space's dot takes before the tabs, when there are spaces.
