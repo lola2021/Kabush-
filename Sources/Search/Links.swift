@@ -146,6 +146,9 @@ final class Links: NSObject, NSApplicationDelegate {
                 return
             }
             browser.arrive(url)
+            // Put away in the Dock, it stayed there: bringing a window to the
+            // front doesn't take it out (#95).
+            if let window = browser.window, window.isMiniaturized { window.deminiaturize(nil) }
             browser.window?.makeKeyAndOrderFront(nil)
             comeForward()
         }
