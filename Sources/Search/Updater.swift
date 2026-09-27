@@ -39,7 +39,14 @@ final class Updater: ObservableObject {
         if overridden, let set = ProcessInfo.processInfo.environment["SEARCH_FEED"], let url = URL(string: set) {
             return url
         }
+        // An Intel Mac has a download of its own from 1.0.5 (build.sh,
+        // SEARCH_ARCH=x86_64) and a feed beside it naming only Intel builds,
+        // so neither kind of Mac is ever offered the other's.
+        #if arch(x86_64)
+        return URL(string: "https://officecommun.com/search/intel/appcast.json")!
+        #else
         return URL(string: "https://officecommun.com/search/appcast.json")!
+        #endif
     }()
 
     private static var overridden: Bool {

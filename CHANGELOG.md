@@ -13,11 +13,13 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
+- Search runs on Intel Macs, with a download of its own beside the Apple Silicon one: one app for both would have weighed twice as much for everyone. Each updates itself from a feed of its own, so neither kind of Mac is ever handed the other's. Thanks [@Assim-Genshi](https://github.com/Assim-Genshi) for asking ([#46](https://github.com/driceroland/Search/issues/46)), and [@geoffreybautistadesign](https://github.com/geoffreybautistadesign) for running it on an Intel Mac first ([#175](https://github.com/driceroland/Search/issues/175))
 - Passkeys under the sign-in field, as in Safari: on a site that offers them there (GitHub, Google and others), the passkeys this Mac holds for it show first in the list under the name box, beside the saved passwords, and a click on one brings up the Mac's sheet for that passkey and signs you in. Nothing reaches the site until you pick one; a site in a frame is offered none. Thanks [@RayBytes](https://github.com/RayBytes) for asking ([#17](https://github.com/driceroland/Search/issues/17))
 - Find on Page says where you are, as in “3 of 17”, and goes round from the last match to the first. Its menu can match case or whole words only. Without Match case, a letter typed without its accent also finds it with one, as before: “ete” finds “été”. On a very long page the count stops at 1000 and shows “1000+” until Next goes further, as Safari's does. PDFs say whether there is a match, without a count. Thanks [@lulkebit](https://github.com/lulkebit) ([#377](https://github.com/driceroland/Search/pull/377))
 
 ### Fixed
 
+- Search weighs less again: 5.3 MB where 1.0.4 had grown to 6.1. The app is now built for size, at the same speed (launch, scrolling and typing measured side by side), and its icon catalog is packed tighter with every Dock style kept.
 - Extensions hear what their own background sends their pages. WebKit delivered none of those messages, so Bitwarden's passkey window stayed blank and its sync timed out; each is now passed on to the extension's pages as well. Thanks [@dttdrv](https://github.com/dttdrv) ([#383](https://github.com/driceroland/Search/pull/383), [#388](https://github.com/driceroland/Search/issues/388))
 - An extension's popup follows the width its page asks for, narrower as well as wider: Bitwarden set to narrow no longer leaves an empty strip down the popup's side. Thanks [@dttdrv](https://github.com/dttdrv) ([#384](https://github.com/driceroland/Search/pull/384))
 - Search no longer offers to save a password typed into an extension's own page, such as Bitwarden's unlock PIN. Thanks [@dttdrv](https://github.com/dttdrv) ([#385](https://github.com/driceroland/Search/pull/385))
