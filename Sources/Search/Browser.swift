@@ -1164,6 +1164,15 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
 
+        // Videos waiting for a click: every tab's next page view follows.
+        prefs.$waitsForPlay
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                DispatchQueue.main.async { for tab in self.tabs + self.parkedTabs { tab.playbackChanged() } }
+            }
+            .store(in: &bag)
+
         // WebKit read the defaults once at the start and keeps its own copy.
         // The only way to change its mind while running is the same action
         // the Edit menu would send it, which also writes the default back.

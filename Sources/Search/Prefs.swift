@@ -211,6 +211,12 @@ final class Preferences: ObservableObject {
     @Published var floatsAway: Bool {
         didSet { store.set(floatsAway, forKey: "float.away") }
     }
+    /// Videos wait for a click instead of starting by themselves, as Safari's
+    /// Never Auto-Play has it (see Web.configuration). Off unless asked for.
+    @Published var waitsForPlay: Bool {
+        didSet { store.set(waitsForPlay, forKey: Preferences.waitsKey) }
+    }
+    nonisolated static let waitsKey = "media.click"
     /// A video playing on a video site comes out into the floating window
     /// when you go to another tab (Browser.leaving). On, as it always was;
     /// the switch is for turning it off.
@@ -308,6 +314,7 @@ final class Preferences: ObservableObject {
         Float.flicks = flicks
         floatsAway = store.bool(forKey: "float.away")
         floatsOnLeave = store.object(forKey: "float.leave") as? Bool ?? true
+        waitsForPlay = store.bool(forKey: Preferences.waitsKey)
         installsUpdates = store.object(forKey: Updater.installKey) as? Bool ?? true
         peeksLinks = store.object(forKey: "links.peek") as? Bool ?? true
         littleLinks = store.bool(forKey: "links.little")
