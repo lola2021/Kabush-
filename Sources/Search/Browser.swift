@@ -278,6 +278,11 @@ final class Browser: NSObject, ObservableObject {
         /// the clear. A click fills only a page that still is that one.
         let host: String
         let clear: Bool
+        /// When it came up. A page can put the caret in a sign-in box
+        /// itself, an invisible one under the pointer included: a click that
+        /// was already on its way is not a choice, so the list takes none for
+        /// its first half second, as Chrome's does.
+        var shown = Date()
     }
     /// Set once you have picked, so the list doesn't come straight back for
     /// the box you are still in. Cleared when the caret leaves the boxes.
@@ -314,6 +319,7 @@ final class Browser: NSObject, ObservableObject {
     func choose(_ login: Login) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }) else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
         suggesting = nil
         // The tab may have gone somewhere else while the list was up: a
         // redirect, a script. What was offered for one site is never put
