@@ -377,8 +377,10 @@ struct ContentView: View {
         roomTicket += 1
         var still = Transaction()
         still.disablesAnimations = true
-        withTransaction(still) { room = at }
-        guard arriving.0 || arriving.1 else { return }
+        // With Reduce Motion on, nothing slides: the page takes its new room
+        // with the chrome, not after a slide that isn't there.
+        withTransaction(still) { room = Motion.reduced ? new : at }
+        guard !Motion.reduced, arriving.0 || arriving.1 else { return }
         let ticket = roomTicket
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) {
             guard ticket == roomTicket else { return }
