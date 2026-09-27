@@ -1283,7 +1283,10 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func select(_ tab: Tab, floatPrevious: Bool = true) {
-        if let id = tab.groupID, let index = tabGroups.firstIndex(where: { $0.id == id }), tabGroups[index].collapsed {
+        // A folded group opens for the tab you go to in it. With groups off,
+        // they are kept as they were and nothing about them is saved.
+        if prefs.usesTabGroups, let id = tab.groupID,
+           let index = tabGroups.firstIndex(where: { $0.id == id }), tabGroups[index].collapsed {
             tabGroups[index].collapsed = false
             writeSession(now: true)
         }
@@ -1412,7 +1415,8 @@ final class Browser: NSObject, ObservableObject {
         ghosts.removeAll { $0.id == ghost.id }
         let tab = Tab()
         prepare(tab)
-        tab.groupID = tabGroups.contains(where: { $0.id == ghost.groupID }) ? ghost.groupID : nil
+        tab.groupID = prefs.usesTabGroups && tabGroups.contains(where: { $0.id == ghost.groupID })
+            ? ghost.groupID : nil
         leaving()
         tabs.insert(tab, at: min(ghost.index, tabs.count))
         if prefs.usesTabGroups { arrangeGroupedTabs() }
@@ -1631,7 +1635,9 @@ final class Browser: NSObject, ObservableObject {
             Tab(configuration: page)
         }
         prepare(tab)
-        if let source, !tab.shy, !tab.bench { tab.groupID = source.groupID }
+        // A link opened from a grouped tab joins its group, only while groups
+        // are on: turned off, they sleep, and nothing new goes into one.
+        if prefs.usesTabGroups, let source, !tab.shy, !tab.bench { tab.groupID = source.groupID }
         tabs.insert(tab, at: atEnd ? tabs.count : placeForNew())
         if prefs.usesTabGroups && tab.groupID != nil { arrangeGroupedTabs() }
         tab.go(to: url)
