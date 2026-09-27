@@ -142,6 +142,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The ad blocker no longer leaves empty boxes where the ads were: the slots news sites keep open for an ad, such as the banner at the top of AS, El País, The Guardian or CNN, now fold away with the ad, so the page closes up around them. Only well-known ad slots are hidden, and only while the blocker is on for the site ([#159](https://github.com/driceroland/Search/issues/159))
 - A link from another app brings back a Search window you had put away in the Dock, where it opened the page in it and left it there. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#367](https://github.com/driceroland/Search/pull/367), [#95](https://github.com/driceroland/Search/issues/95))
 - A page on this Mac opened from the Finder keeps its pictures and styles when its tab wakes up or is reloaded, where it came back empty, and its tab wears the file name's first letter. Thanks [@DagimAlemayehuu](https://github.com/DagimAlemayehuu) ([#366](https://github.com/driceroland/Search/pull/366))
+- Replace what came from a browser before no longer loses bookmarks when that browser's files don't read: what came from it before is kept, what could be read is added, and the sheet says so. A browser that reads cleanly and has fewer bookmarks than before is still replaced. Thanks [@lulkebit](https://github.com/lulkebit) ([#375](https://github.com/driceroland/Search/pull/375))
 
 ## 1.0.3 — 24 September 2026
 

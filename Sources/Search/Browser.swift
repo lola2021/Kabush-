@@ -125,17 +125,29 @@ final class Browser: NSObject, ObservableObject {
     /// here already. `replacing`: what came from this browser before —
     /// as recorded, nothing guessed — is taken out first, and these come
     /// fresh in its place.
+    ///
+    /// Only when every profile read cleanly: a file that didn't read is not
+    /// an empty browser, and taking out what came before for it lost
+    /// bookmarks for good (#375). Then what came before stays, what could be
+    /// read is added as usual, and `kept` says so.
     @discardableResult
-    func takeBookmarks(from source: ImportSource, profile: String? = nil, replacing: Bool = false) -> (added: Int, already: Int) {
-        let found = source.bookmarks(profile: profile)
+    func takeBookmarks(from source: ImportSource, profile: String? = nil, replacing: Bool = false) -> (added: Int, already: Int, kept: Bool) {
+        let read = source.bookmarkRead(profile: profile)
+        let found = read.nodes
+        var kept = false
         if replacing, let earlier = ImportRecords.of(source.name), !earlier.bookmarkIDs.isEmpty {
-            bookmarks.withdraw(earlier.bookmarkIDs)
-            ImportRecords.forgetBookmarks(source.name)
+            if read.complete {
+                bookmarks.withdraw(earlier.bookmarkIDs)
+                ImportRecords.forgetBookmarks(source.name)
+            } else {
+                kept = true
+            }
         }
         let (count, already, ids) = bookmarks.takeNoting(found, from: source.name)
         ImportRecords.note(source.name, bookmarks: ids, bookmarks: count)
         announce(
-            Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
+            kept ? "Couldn't read all of \(source.name)'s bookmarks: what came from it before was kept"
+                : Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
                 : count == 0 ? "The bookmarks from \(source.name) were all here already"
                 : already == 0 ? "\(count) bookmarks from \(source.name)"
                 : "\(count) new bookmarks from \(source.name), \(already) already here"
@@ -148,7 +160,7 @@ final class Browser: NSObject, ObservableObject {
                 self.objectWillChange.send()
             }
         }
-        return (count, already)
+        return (count, already, kept)
     }
 
     /// The "Bring things over" sheet, open while set: the browser it
