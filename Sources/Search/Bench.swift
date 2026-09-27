@@ -1103,6 +1103,47 @@ final class Bench {
             // seen is checked on a release candidate instead.
             answer(["error": "visible is switched off: it made a window, and no bench verb makes one for now — check this on a release candidate"])
 
+        case "ai":
+            // The AI add-on's requests against a stand-in on this Mac: "mock"
+            // points every provider at it, "key" keeps a made-up key for the
+            // run (in memory), "ask" sends one question and gives back the
+            // whole answer or the error. Only on a SEARCH_PROBE run, and only
+            // ever to the loopback address.
+            guard Store.testing else { answer(["error": "ai only works on a --test run"]); return }
+            switch request["action"] as? String {
+            case "mock":
+                guard let url = (request["url"] as? String).flatMap(URL.init(string:)),
+                      ["127.0.0.1", "localhost", "::1"].contains(url.host() ?? "")
+                else { answer(["error": "ai mock needs an address on this Mac"]); return }
+                AIProvider.mock = url
+                answer(["mock": url.absoluteString])
+            case "key":
+                guard let provider = (request["provider"] as? String).flatMap(AIProvider.init(rawValue:)),
+                      let key = request["key"] as? String
+                else { answer(["error": "ai key PROVIDER KEY"]); return }
+                let saved = AIKeys.save(key, for: provider)
+                answer(["saved": "\(saved)", "hint": AIKeys.hint(for: provider) ?? ""])
+            case "ask":
+                guard let provider = (request["provider"] as? String).flatMap(AIProvider.init(rawValue:)) else {
+                    answer(["error": "ai ask PROVIDER MODEL TEXT"]); return
+                }
+                let model = request["model"] as? String ?? provider.defaultModel
+                let stream = AIClient.shared.stream(provider, model: model, system: "You are a test.",
+                                                    messages: [AIMessage(role: .user, text: request["text"] as? String ?? "")],
+                                                    key: AIKeys.key(for: provider))
+                Task { @MainActor in
+                    var text = "", pieces = 0
+                    do {
+                        for try await piece in stream { text += piece; pieces += 1 }
+                        answer(["text": text, "pieces": pieces])
+                    } catch {
+                        answer(["error": error.localizedDescription, "text": text])
+                    }
+                }
+            default:
+                answer(["error": "ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT"])
+            }
+
         case "answer":
             // The card of a page asking for the camera, microphone or your
             // location: once, always or no. Only on a SEARCH_PROBE run.
@@ -2045,7 +2086,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find", "answer", "visible",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find", "answer", "visible", "ai",
             ]])
         }
     }
