@@ -65,6 +65,7 @@ in [ROADMAP.md](ROADMAP.md).
 - File › Bring Things Over… opens the sheet for another browser's bookmarks, history, passwords and extensions, as Safari's File › Import From does, and so does Bring Things Over… in Settings › General: any time, not only at the first launch.
 - Bringing things over remembers what came from each browser and when — beside it in the sheet, "brought 27 Sep", and what came: 312 bookmarks, 1,204 places, 58 passwords — and bringing the same browser in again still adds only what is new. Replace what came from Chrome before, beside Bookmarks, takes out exactly the bookmarks and folders that came from it last time, then brings them fresh; your own stay, and so does a folder of theirs you have put something in. Passwords only ever add or update. An import from before 1.0.4 has nothing recorded, so there is nothing to replace yet.
 - Bringing things over from Arc brings its spaces too: each of Arc's spaces becomes a space here, with its own sign-ins when Arc's had another profile, its pinned tabs in it, asleep until you go to them (folders opened out in their order), and Arc's favourites as each space's pins. A space of the same name is filled rather than made again, and bringing Arc in again adds only what is new. More than one space turns spaces on. Thanks to everyone who asked for Arc's spaces on X.
+- With tab groups on, each of Arc's folders comes over as a tab group of the same name in its space, its pages asleep in it; with them off, a folder's pages come opened out in their order, and groups stay off.
 
 ### Fixed
 

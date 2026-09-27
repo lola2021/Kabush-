@@ -1434,45 +1434,81 @@ final class Browser: NSObject, ObservableObject {
         return (made, pins, added)
     }
 
-    /// Arc's pinned list, folders opened out in their order.
-    private static func opened(_ nodes: [ArcSidebar.Node]) -> [ArcSidebar.Item] {
-        nodes.flatMap { node -> [ArcSidebar.Item] in
+    /// Arc's pinned list, folders opened out in their order, each page with
+    /// the top folder it came from: a tab group's name, when groups are on.
+    private static func opened(_ nodes: [ArcSidebar.Node], in folder: String? = nil) -> [(item: ArcSidebar.Item, folder: String?)] {
+        nodes.flatMap { node -> [(item: ArcSidebar.Item, folder: String?)] in
             switch node {
-            case .item(let item): [item]
-            case .folder(let folder): opened(folder.items)
+            case .item(let item): [(item, folder)]
+            case .folder(let inner): opened(inner.items, in: folder ?? inner.title)
             }
         }
     }
 
     /// Pages as tabs at the end of a space's row, asleep: the row on
     /// screen, a parked one, or the one saved for a space not brought up.
-    private func takeAsleep(_ items: [ArcSidebar.Item], into space: UUID) -> Int {
+    /// With tab groups on, a page from one of Arc's folders goes into the
+    /// group of that name in the space, made if there is none; with them
+    /// off, the folders stay opened out. Groups are never turned on here.
+    private func takeAsleep(_ items: [(item: ArcSidebar.Item, folder: String?)], into space: UUID) -> Int {
+        let grouping = prefs.usesTabGroups
         func asleep(_ item: ArcSidebar.Item) -> Tab {
             let tab = Tab(configuration: Web.configuration(space: space))
             prepare(tab)
             tab.restore(url: item.url, title: item.title)
             return tab
         }
-        func fresh(_ have: [String]) -> [ArcSidebar.Item] {
+        func fresh(_ have: [String]) -> [(item: ArcSidebar.Item, folder: String?)] {
             var seen = Set(have)
-            return items.filter { seen.insert($0.url.absoluteString).inserted }
+            return items.filter { seen.insert($0.item.url.absoluteString).inserted }
+        }
+        /// The group a folder's pages go into, by name, made if missing.
+        func group(_ folder: String?, in groups: inout [TabGroup]) -> UUID? {
+            guard grouping, let folder else { return nil }
+            if let same = groups.first(where: { $0.name == folder }) { return same.id }
+            let made = TabGroup(id: UUID(), name: folder, collapsed: false)
+            groups.append(made)
+            return made.id
         }
         if space == spaceID {
             let new = fresh(tabs.compactMap { ($0.pending ?? $0.address)?.absoluteString })
-            tabs += new.map(asleep)
+            var groups = tabGroups
+            tabs += new.map { page in
+                let tab = asleep(page.item)
+                tab.groupID = group(page.folder, in: &groups)
+                return tab
+            }
+            if groups != tabGroups {
+                tabGroups = groups
+                arrangeGroupedTabs()
+            }
             writeRow(spaceID, session(tabs, active: activeID, groups: tabGroups), now: true)
             return new.count
         }
+        // A parked row's groups are the ones saved for it (see allRows).
+        var saved = readRow(space)
+        var groups = saved.groups ?? []
         if var row = parked[space] {
             let new = fresh(row.tabs.compactMap { ($0.pending ?? $0.address)?.absoluteString })
-            row.tabs += new.map(asleep)
+            row.tabs += new.map { page in
+                let tab = asleep(page.item)
+                tab.groupID = group(page.folder, in: &groups)
+                return tab
+            }
             parked[space] = row
+            if groups != (saved.groups ?? []) {
+                saved.groups = groups
+                writeRow(space, saved, now: true)
+            }
             return new.count
         }
-        var row = readRow(space)
-        let new = fresh(row.tabs.map(\.url))
-        row.tabs += new.map { Session.Entry(url: $0.url.absoluteString, title: $0.title) }
-        writeRow(space, row, now: true)
+        let new = fresh(saved.tabs.map(\.url))
+        saved.tabs += new.map { page in
+            Session.Entry(url: page.item.url.absoluteString, title: page.item.title,
+                          groupID: group(page.folder, in: &groups))
+        }
+        if grouping { saved.groups = groups }
+        writeRow(space, saved, now: true)
         return new.count
     }
 
