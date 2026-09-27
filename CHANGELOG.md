@@ -63,6 +63,7 @@ in [ROADMAP.md](ROADMAP.md).
 - ⌘Return keeps a peek as a tab, as its Open as a Tab button does; the keypad's Enter too. While you type in the peeked page, ⌘Return is left to it, to send a message. Thanks [@bhanni01](https://github.com/bhanni01) ([#326](https://github.com/driceroland/Search/pull/326))
 - Pins fill their rows evenly: at most four to a row, fewer only in a column too narrow for four, and the rows as even as they go, the fuller first — five are three and two, seven four and three, nine three rows of three, ten four, three and three. Each row shares the column's width between its own pins. Thanks [@Tenk1](https://github.com/Tenk1) for asking ([#240](https://github.com/driceroland/Search/issues/240))
 - File › Bring Things Over… opens the sheet for another browser's bookmarks, history, passwords and extensions, as Safari's File › Import From does, and so does Bring Things Over… in Settings › General: any time, not only at the first launch.
+- Bringing things over remembers what came from each browser and when — beside it in the sheet, "brought 27 Sep", and what came: 312 bookmarks, 1,204 places, 58 passwords — and bringing the same browser in again still adds only what is new. Replace what came from Chrome before, beside Bookmarks, takes out exactly the bookmarks and folders that came from it last time, then brings them fresh; your own stay, and so does a folder of theirs you have put something in. Passwords only ever add or update. An import from before 1.0.4 has nothing recorded, so there is nothing to replace yet.
 
 ### Fixed
 

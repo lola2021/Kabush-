@@ -120,11 +120,18 @@ final class Browser: NSObject, ObservableObject {
     /// every profile's when nil — and, behind them, the icons it had for
     /// those sites, so the menu wears them from the start instead of a
     /// letter each. Returns how many pages came over, and how many were
-    /// here already.
+    /// here already. `replacing`: what came from this browser before —
+    /// as recorded, nothing guessed — is taken out first, and these come
+    /// fresh in its place.
     @discardableResult
-    func takeBookmarks(from source: ImportSource, profile: String? = nil) -> (added: Int, already: Int) {
+    func takeBookmarks(from source: ImportSource, profile: String? = nil, replacing: Bool = false) -> (added: Int, already: Int) {
         let found = source.bookmarks(profile: profile)
-        let (count, already) = bookmarks.take(found, from: source.name)
+        if replacing, let earlier = ImportRecords.of(source.name), !earlier.bookmarkIDs.isEmpty {
+            bookmarks.withdraw(earlier.bookmarkIDs)
+            ImportRecords.forgetBookmarks(source.name)
+        }
+        let (count, already, ids) = bookmarks.takeNoting(found, from: source.name)
+        ImportRecords.note(source.name, bookmarks: ids, bookmarks: count)
         announce(
             Bookmarks.count(found) == 0 ? "No bookmarks in \(source.name)"
                 : count == 0 ? "The bookmarks from \(source.name) were all here already"
@@ -503,6 +510,7 @@ final class Browser: NSObject, ObservableObject {
         switch outcome {
         case .success(let found):
             let kept = keep(found)
+            ImportRecords.note(name, passwords: kept)
             announce(kept == 0 ? "Nothing new in \(name)" : "\(kept) passwords from \(name)")
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(name) didn't give up its keychain key")
@@ -523,6 +531,7 @@ final class Browser: NSObject, ObservableObject {
                     self.history.take(place.url, title: place.title, count: place.count, last: place.last)
                 }
                 self.history.settle()
+                ImportRecords.note(source.name, places: places.count)
                 done(places.count)
             }
         }

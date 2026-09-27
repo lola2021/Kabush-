@@ -58,7 +58,7 @@
                                        until the page is loading
     ./bench pull DX [STEPS] [MS]       test run: two fingers DX points sideways over the page (back is +) — where it went
     ./bench keyeq CHARS CODE [shift]   test run: ⌘CHARS pressed while the page has the keyboard — who took it
-    ./bench import BROWSER [WHAT…] [--profile NAME|all]
+    ./bench import BROWSER [WHAT…] [--profile NAME|all] [--replace]
                                      test run: bookmarks, history, passwords from a made-up profile in the world's Import/
                                      (the one used most recently, unless a profile is named, or all)
     ./bench import-preview           test run: each browser found, its profiles, the one used most recently, and what
@@ -295,6 +295,9 @@ def main(argv):
         request["new"] = len(args) == 2
     elif verb == "import":
         kinds = ("bookmarks", "history", "passwords")
+        if "--replace" in args:
+            request["replace"] = True
+            args = [a for a in args if a != "--replace"]
         if "--profile" in args:
             at = args.index("--profile")
             if at + 1 >= len(args): sys.exit("usage: bench import BROWSER [WHAT…] --profile NAME|all")

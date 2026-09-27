@@ -890,7 +890,7 @@ final class Bench {
             var out: [String: Any] = ["found": found.map(\.name), "profiles": source.profiles.map(\.id),
                                       "profile": profile ?? "all"]
             if what.contains("bookmarks") {
-                let (added, already) = browser.bookmarks.take(source.bookmarks(profile: profile), from: source.name)
+                let (added, already) = browser.takeBookmarks(from: source, profile: profile, replacing: request["replace"] as? Bool == true)
                 out["bookmarks"] = ["added": added, "already": already, "total": browser.bookmarks.count,
                                     "top": browser.bookmarks.roots.map(\.title)]
             }
@@ -899,6 +899,7 @@ final class Bench {
                 for place in places { browser.history.take(place.url, title: place.title, count: place.count, last: place.last) }
                 browser.history.settle()
                 out["places"] = places.count
+                ImportRecords.note(source.name, places: places.count)
             }
             if what.contains("passwords") {
                 let outcome = Result { try source.read(profile: profile) }
@@ -908,6 +909,11 @@ final class Bench {
                 }
                 browser.took(outcome, from: source.name)
                 out["saved"] = browser.saved.count
+            }
+            // What is now recorded from it, as the sheet shows it.
+            if let record = ImportRecords.of(source.name) {
+                out["record"] = ["bookmarks": record.bookmarks, "places": record.places, "passwords": record.passwords,
+                                 "ids": record.bookmarkIDs.count]
             }
             answer(out)
 
