@@ -20,9 +20,17 @@ final class Browser: NSObject, ObservableObject {
             }
             guard oldValue != activeID, let old = oldValue else { return }
             linkStatus.dismiss()
-            tabs.first { $0.id == old }?.touch()
+            let left = tabs.first { $0.id == old }
+            left?.touch()
+            // The switcher (Settings › Tabs) keeps its order and pictures
+            // only while it is on; off, a switch records nothing for it.
+            guard prefs.mruSwitcher else { return }
+            tabSwitcher.cancel()
+            if let left { tabSwitcher.left(left, alive: Set((tabs + parkedTabs).map(\.id))) }
         }
     }
+
+    let tabSwitcher = TabSwitcher()
 
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
@@ -1062,6 +1070,13 @@ final class Browser: NSObject, ObservableObject {
             }
             .store(in: &bag)
 
+        prefs.$mruSwitcher
+            .dropFirst()
+            .sink { [weak self] on in
+                if !on { self?.tabSwitcher.reset() }
+            }
+            .store(in: &bag)
+
         prefs.$passkeys
             .dropFirst()
             .sink { [weak self] on in
@@ -1445,6 +1460,19 @@ final class Browser: NSObject, ObservableObject {
     func select(index: Int) {
         guard tabs.indices.contains(index) else { return }
         select(tabs[index])
+    }
+
+    /// ⌃Tab with the switcher on: the space's tabs, the most recently used
+    /// first. Nothing changes until ⌃ is let go of (`commitTabSwitch`).
+    func switchTabs(backwards: Bool) {
+        guard let activeID else { return }
+        tabSwitcher.step(row: tabs.map(\.id), current: activeID, backwards: backwards)
+    }
+
+    func commitTabSwitch(picking id: Tab.ID? = nil) {
+        guard let target = tabSwitcher.finish(picking: id),
+              let tab = tabs.first(where: { $0.id == target }) else { return }
+        select(tab)
     }
 
     /// A link opened from a page lands next to the page it came from, not at

@@ -301,6 +301,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.showsReading)
             }
             Rule()
+            Line("Recently used tab switcher", "⌃Tab shows up to ten tabs as pictures, the last one you were on first. Hold ⌃ and press Tab again to go further back, let go to switch. Off, ⌃Tab walks the row.") {
+                Switch(on: $prefs.mruSwitcher)
+            }
+            Rule()
             Line("Sleep tabs you aren't using", "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.") {
                 Switch(on: $prefs.sleepsTabs)
             }

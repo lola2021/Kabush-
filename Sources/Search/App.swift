@@ -490,6 +490,7 @@ struct ContentView: View {
             }
             .overlay { field }
             .overlay { panels }
+            .overlay { TabSwitcherOverlay(browser: browser, switcher: browser.tabSwitcher) }
             // The field comes on its spring, and goes quickly: once Return
             // is pressed the page is on its way, and the field is not what
             // there is to watch.
@@ -502,6 +503,7 @@ struct ContentView: View {
             // buttons, and on a light window they come out nearly white. Ours
             // go on in their place until the app comes back.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                browser.tabSwitcher.cancel()
                 measureLights()
                 resting?.isHidden = false
                 // Only the window you were in, or every window's video would come.
@@ -509,6 +511,9 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { Browser.front = browser }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+                if let window, (note.object as? NSWindow) === window { browser.tabSwitcher.cancel() }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 resting?.isHidden = true
@@ -778,6 +783,10 @@ struct ContentView: View {
         guard keys == nil else { return }
         keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard event.type == .keyDown else {
+                // ⌃ let go of switches to the tab the switcher is on.
+                if browser.tabSwitcher.active, !event.modifierFlags.contains(.control) {
+                    browser.commitTabSwitch()
+                }
                 // ⌘ let go of ends a ⌘K walk, wherever it stopped.
                 if !event.modifierFlags.contains(.command) { browser.landSummon() }
                 return event
@@ -835,6 +844,18 @@ struct ContentView: View {
             || browser.active?.built?.inputContext != nil
     }
 
+    /// Whether the tab switcher can come up: in this window, with nothing
+    /// over the page it would have to cover.
+    private func canSwitchTabs(_ event: NSEvent) -> Bool {
+        guard let window, event.window === window else { return false }
+        return !browser.tuning && !browser.recalling && !browser.hoarding &&
+            !browser.bookmarking && !browser.welcoming && !browser.managing &&
+            !browser.reviewing && !browser.finding && !browser.bookmarksOpen &&
+            !browser.veiling && !browser.summoning && !browser.makingSpace &&
+            browser.peekTab == nil && browser.editingTab == nil &&
+            browser.asking == nil && browser.offering == nil && browser.suggesting == nil
+    }
+
     /// The keys of the top row, by where they sit rather than what they type.
     static let digits: [UInt16: Int] = [
         18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9, 29: 0,
@@ -845,6 +866,29 @@ struct ContentView: View {
         if let little = LittleWindow.owning(event.window) { return little.take(event) }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        let controlTab = event.keyCode == 48 && flags.contains(.control)
+            && flags.isDisjoint(with: [.command, .option])
+
+        // While the tab switcher is up, ⌃ and the arrows move through it and
+        // ⌃Tab goes on below; any other key puts it away, and Escape does
+        // nothing else.
+        if browser.tabSwitcher.active, !controlTab {
+            if flags.contains(.control), flags.isDisjoint(with: [.command, .option]) {
+                let direction: TabSwitcher.Direction? = switch event.keyCode {
+                case 123: .left
+                case 124: .right
+                case 125: .down
+                case 126: .up
+                default: nil
+                }
+                if let direction {
+                    browser.tabSwitcher.move(direction)
+                    return true
+                }
+            }
+            browser.tabSwitcher.cancel()
+            if event.keyCode == 53 { return true }
+        }
 
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
@@ -918,10 +962,19 @@ struct ContentView: View {
         // round to the first again, ⌃⇧Tab the other way — the keys every
         // other browser uses for that.
         //
+        // With the switcher on (Settings › Tabs), ⌃Tab brings it up instead,
+        // most recently used first — whenever there is nothing over the page
+        // it would have to cover; otherwise it walks the row as before.
+        //
         // While an address is being typed, the list under the field is what
         // there is to move through, and Return takes whatever the walk landed on.
         if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
             if flags.contains(.control) {
+                if browser.prefs.mruSwitcher, canSwitchTabs(event) {
+                    // A Tab held down doesn't race through them.
+                    if !event.isARepeat { browser.switchTabs(backwards: flags.contains(.shift)) }
+                    return true
+                }
                 browser.step(flags.contains(.shift) ? -1 : 1)
                 return true
             }

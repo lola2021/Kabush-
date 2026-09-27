@@ -907,6 +907,31 @@ final class Tab: ObservableObject, Identifiable {
         }
     }
 
+    /// A small picture of the page for the tab switcher. A sleeping tab's
+    /// comes from the picture kept for waking it; a tab brought back from
+    /// last time and not opened yet has none, rather than a page built for it.
+    func preview(width: CGFloat, _ done: @escaping (NSImage?) -> Void) {
+        if let picture {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let source = CGImageSourceCreateWithData(picture as CFData, nil)
+                let options = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: Int(width * 2)
+                ] as CFDictionary
+                let thumbnail = source.flatMap { CGImageSourceCreateThumbnailAtIndex($0, 0, options) }
+                DispatchQueue.main.async {
+                    let image = thumbnail.map { NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height)) }
+                    done(image)
+                }
+            }
+            return
+        }
+        guard let built else { return done(nil) }
+        let configuration = WKSnapshotConfiguration()
+        configuration.snapshotWidth = NSNumber(value: Double(width))
+        built.takeSnapshot(with: configuration) { image, _ in done(image) }
+    }
+
     nonisolated private static func jpeg(_ image: CGImage) -> Data? {
         let data = NSMutableData()
         guard let out = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
