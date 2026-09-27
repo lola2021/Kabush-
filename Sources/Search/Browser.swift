@@ -1919,6 +1919,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             return
         }
 
+        // 0.0.0.0, as a dev server prints it: this Mac, as localhost (see
+        // Address.reachable). Only the page itself; a frame goes nowhere.
+        if action.targetFrame?.isMainFrame == true, let local = Address.reachable(url) {
+            decisionHandler(.cancel)
+            webView.load(URLRequest(url: local))
+            return
+        }
+
         // An extension's page sending its own tab to a website (see
         // replace(_:going:)).
         if #available(macOS 15.4, *), ["http", "https"].contains(scheme),
