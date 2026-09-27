@@ -3426,7 +3426,8 @@ enum ExtensionAuth {
     }
 
     static func run(_ url: URL, extension id: String, browser: Browser) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
+        if #available(macOS 15.4, *) { try Extensions.mayOpen(url) }
+        return try await withCheckedThrowingContinuation { continuation in
             waiting[id]?.finish(.failure(Declined()))
             let tab = browser.open(url, foreground: true)
             waiting[id] = (tab.id, { result in continuation.resume(with: result) })
