@@ -877,6 +877,15 @@ struct TabMenu: View {
         }
         .disabled(tab.isBlank)
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+        // Its page let go of now, as it would be after half an hour unseen:
+        // the row keeps its title and picture, and it loads again when gone
+        // to. Not the tab on screen, nor one that has to stay awake (#310).
+        Button("Put to Sleep") {
+            browser.sleep(tab) { outcome in
+                if outcome != "asleep" { browser.announce("Stays awake: \(outcome)") }
+            }
+        }
+        .disabled(browser.awake(because: tab) != nil)
         Divider()
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }
