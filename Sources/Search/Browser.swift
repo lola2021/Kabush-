@@ -369,6 +369,8 @@ final class Browser: NSObject, ObservableObject {
         let tab: Tab.ID
         var spot: CGRect
         let logins: [Login]
+        /// The Mac's passkeys for a page waiting for one under its field.
+        var passkeys: [Passkeys.Offered] = []
         /// The page the list was made for: its site, and whether it came in
         /// the clear. A click fills only a page that still is that one.
         let host: String
@@ -390,6 +392,9 @@ final class Browser: NSObject, ObservableObject {
     /// in. The box reports where it is on every frame of a scroll so the
     /// list can follow it; the keychain is asked once per box, not per frame.
     private var looked: (tab: Tab.ID, host: String, clear: Bool)?
+    /// The sign-in box the caret is in, for a list that changes while it is
+    /// there: the page's passkeys arrive when they arrive.
+    private var field: (tab: Tab.ID, spot: CGRect, passwords: Bool)?
 
     func keepOffer() {
         guard let offer = offering else { return }
@@ -414,6 +419,65 @@ final class Browser: NSObject, ObservableObject {
         announce("Never for \(offer.login.host)")
     }
 
+    /// The caret in a sign-in box: the accounts kept for this site, and the
+    /// Mac's passkeys for a page waiting for one, hang from the box, and go
+    /// when the caret does. Nothing is filled on its own — the way Safari
+    /// does it, and what a person expects.
+    private func hang(from tab: Tab, _ spot: CGRect?, passwords: Bool) {
+        guard let spot else {
+            if field?.tab == tab.id { field = nil }
+            if looked?.tab == tab.id { looked = nil }
+            if pickedInto == tab.id { pickedInto = nil }
+            guard suggesting?.tab == tab.id else { return }
+            lowering?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, suggesting?.tab == tab.id else { return }
+                suggesting = nil
+            }
+            lowering = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+            return
+        }
+        lowering?.cancel()
+        field = (tab.id, spot, passwords)
+        guard tab.id == activeID, pickedInto != tab.id,
+              let host = curtain.host(of: tab.pageAddress)
+        else { return }
+        // A page that came over plain http can have been written by
+        // anyone on the way here — a café's network, a hotel's. It is
+        // offered only what was kept from plain http too, never an
+        // account kept from the https site of the same name.
+        let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
+        // The same box, moved by a scroll: the list up follows it, keeping
+        // its accounts and the moment it came up (a click is refused for
+        // its first half second, which every frame used to start again);
+        // a box with no accounts stays without, and the keychain isn't
+        // asked again until the caret leaves.
+        if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear {
+            if var up = suggesting, up.tab == tab.id, up.spot != spot {
+                up.spot = spot
+                suggesting = up
+            }
+            return
+        }
+        looked = (tab.id, host, inTheClear)
+        // Passwords only for a box that goes with one: a box for passkeys
+        // alone has no password to put anywhere.
+        let known = prefs.fillsPasswords && passwords
+            ? Array(Vault.logins(matching: host).filter { !inTheClear || $0.clear }.prefix(5)) : []
+        let passkeys = Passkeys.shared.offered(in: tab.built)
+        guard !known.isEmpty || !passkeys.isEmpty else {
+            suggesting = nil
+            return
+        }
+        // What is under the pointer changed: the half second starts again.
+        if let up = suggesting, up.tab == tab.id, up.logins == known, up.passkeys == passkeys {
+            suggesting?.spot = spot
+            return
+        }
+        suggesting = Suggesting(tab: tab.id, spot: spot, logins: known, passkeys: passkeys, host: host, clear: inTheClear)
+    }
+
     /// One of the accounts in the list, picked by name.
     func choose(_ login: Login) {
         lowering?.cancel()
@@ -431,6 +495,20 @@ final class Browser: NSObject, ObservableObject {
             if !worked { self?.announce("Couldn't find the sign-in fields anymore") }
         }
         Vault.touch(login)
+    }
+
+    /// One of the passkeys in the list: the Mac's sheet for it, and the
+    /// page's request answered with it.
+    func choose(_ passkey: Passkeys.Offered) {
+        lowering?.cancel()
+        guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }), let web = tab.built else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
+        suggesting = nil
+        guard curtain.host(of: tab.pageAddress) == list.host,
+              (tab.pageAddress?.scheme?.lowercased() == "http") == list.clear
+        else { return }
+        pickedInto = tab.id
+        Passkeys.shared.sign(in: web, with: passkey.id)
     }
 
     func dropChoice() { suggesting = nil }
@@ -1042,6 +1120,18 @@ final class Browser: NSObject, ObservableObject {
             .store(in: &bag)
         bookmarks.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &bag)
+
+        // A page's passkeys for under its field, arriving while the caret
+        // is already there, or going with the page's request.
+        NotificationCenter.default.publisher(for: Passkeys.offeredChanged)
+            .sink { [weak self] note in
+                guard let self, let web = note.object as? WKWebView, let field, let tab = tab(for: web),
+                      tab.id == field.tab
+                else { return }
+                looked = nil
+                hang(from: tab, field.spot, passwords: field.passwords)
+            }
             .store(in: &bag)
 
         // So are the pins.
@@ -2568,45 +2658,8 @@ final class Browser: NSObject, ObservableObject {
         // The caret in a sign-in box: the accounts kept for this site hang
         // from the box, and go when the caret does. Nothing is filled on
         // its own — the way Safari does it, and what a person expects.
-        tab.onField = { [weak self] tab, spot in
-            guard let self else { return }
-            guard let spot else {
-                if looked?.tab == tab.id { looked = nil }
-                if pickedInto == tab.id { pickedInto = nil }
-                guard suggesting?.tab == tab.id else { return }
-                lowering?.cancel()
-                let work = DispatchWorkItem { [weak self] in
-                    guard let self, suggesting?.tab == tab.id else { return }
-                    suggesting = nil
-                }
-                lowering = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
-                return
-            }
-            lowering?.cancel()
-            guard prefs.fillsPasswords, tab.id == activeID, pickedInto != tab.id,
-                  let host = curtain.host(of: tab.pageAddress)
-            else { return }
-            // A page that came over plain http can have been written by
-            // anyone on the way here — a café's network, a hotel's. It is
-            // offered only what was kept from plain http too, never an
-            // account kept from the https site of the same name.
-            let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
-            // The same box, moved by a scroll: the list up follows it, keeping
-            // its accounts and the moment it came up (a click is refused for
-            // its first half second, which every frame used to start again);
-            // a box with no accounts stays without, and the keychain isn't
-            // asked again until the caret leaves.
-            if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear {
-                if var up = suggesting, up.tab == tab.id, up.spot != spot {
-                    up.spot = spot
-                    suggesting = up
-                }
-                return
-            }
-            looked = (tab.id, host, inTheClear)
-            let known = Array(Vault.logins(matching: host).filter { !inTheClear || $0.clear }.prefix(5))
-            suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known, host: host, clear: inTheClear)
+        tab.onField = { [weak self] tab, spot, passwords in
+            self?.hang(from: tab, spot, passwords: passwords)
         }
 
         tab.onCredentials = { [weak self] tab, host, user, password, clear in

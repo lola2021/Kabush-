@@ -39,9 +39,11 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
                 if tab?.typing != typing { tab?.typing = typing }
                 // Which sign-in box the caret is in, and where it sits on the
                 // page — so a list of accounts can hang from it.
+                // A box of a name and password, or one the page marks for
+                // passkeys alone ("webauthn"), which takes no password.
                 if let rect = body["rect"] as? [String: Double],
                    let x = rect["x"], let y = rect["y"], let w = rect["w"], let h = rect["h"] {
-                    tab?.fieldFocused(CGRect(x: x, y: y, width: w, height: h))
+                    tab?.fieldFocused(CGRect(x: x, y: y, width: w, height: h), passwords: body["passwords"] as? Bool ?? true)
                 } else {
                     tab?.fieldFocused(nil)
                 }
@@ -284,22 +286,29 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // What was last said, so a scroll can keep quiet when nothing moved
       // that anyone is listening for.
       var said = null;
+      // A box the page says takes a passkey: autocomplete="username webauthn".
+      function forPasskeys(el) {
+        return !!(el && (el.tagName || '').toLowerCase() === 'input' &&
+          /(^|\\s)webauthn(\\s|$)/i.test(el.getAttribute('autocomplete') || ''));
+      }
       function caret(scrolled) {
         var el = document.activeElement;
         var both = pair();
         var rect = null;
-        if (both && el && (el === both.user || el === both.pass)) {
+        var passwords = !!(both && el && (el === both.user || el === both.pass));
+        if (passwords || forPasskeys(el)) {
           var r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
         }
         var typing = editable(el);
-        var now = typing + (rect ? ' ' + rect.x + ' ' + rect.y + ' ' + rect.w + ' ' + rect.h : '');
+        var now = typing + (rect ? ' ' + passwords + ' ' + rect.x + ' ' + rect.y + ' ' + rect.w + ' ' + rect.h : '');
         if (scrolled === true && now === said) return;
         said = now;
         window.webkit.messageHandlers.officeForms.postMessage({
           kind: 'focus',
           typing: typing,
-          rect: rect
+          rect: rect,
+          passwords: passwords
         });
       }
 

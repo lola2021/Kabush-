@@ -11,6 +11,10 @@ in [ROADMAP.md](ROADMAP.md).
 
 ## Unreleased
 
+### Added
+
+- Passkeys under the sign-in field, as in Safari: on a site that offers them there (GitHub, Google and others), the passkeys this Mac holds for it show first in the list under the name box, beside the saved passwords, and a click on one brings up the Mac's sheet for that passkey and signs you in. Nothing reaches the site until you pick one; a site in a frame is offered none. Thanks [@RayBytes](https://github.com/RayBytes) for asking ([#17](https://github.com/driceroland/Search/issues/17))
+
 ### Fixed
 
 - Extensions hear what their own background sends their pages. WebKit delivered none of those messages, so Bitwarden's passkey window stayed blank and its sync timed out; each is now passed on to the extension's pages as well. Thanks [@dttdrv](https://github.com/dttdrv) ([#383](https://github.com/driceroland/Search/pull/383), [#388](https://github.com/driceroland/Search/issues/388))

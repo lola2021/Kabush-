@@ -57,6 +57,8 @@
     ./bench field TEXT [type] [go]     test run: TEXT pasted into the address field (type: a key at a time),
                                        each timed until the window has caught up; go: then Return, timed
                                        until the page is loading
+    ./bench accounts [ROW]             test run: the list under the sign-in box the caret is in (passkeys,
+                                       then passwords); ROW: a click on that row, from 0
     ./bench pull DX [STEPS] [MS]       test run: two fingers DX points sideways over the page (back is +) — where it went
     ./bench keyeq CHARS CODE [shift]   test run: ⌘CHARS pressed while the page has the keyboard — who took it
     ./bench import BROWSER [WHAT…] [--profile NAME|all] [--replace]
@@ -383,6 +385,9 @@ def main(argv):
         else:
             if len(args) > 2: request["frames"] = int(args[2])
             if len(args) > 3: request["every"] = float(args[3])
+    elif verb == "accounts":
+        if len(args) not in (0, 1) or (args and not args[0].isdigit()): sys.exit("usage: bench accounts [ROW]")
+        if args: request["pick"] = int(args[0])
     elif verb not in ("tabs", "probe", "extensions", "import-preview", "quit"):
         sys.exit(f"unknown command “{verb}” — see bench help")
 
