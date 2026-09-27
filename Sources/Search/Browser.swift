@@ -732,6 +732,8 @@ final class Browser: NSObject, ObservableObject {
     /// alert(), confirm() and prompt() from tabs that weren't in front,
     /// waiting for them to be (see Dialogs.swift).
     var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
+    /// Downloads from private tabs, which the Downloads list never shows.
+    var unlisted: Set<ObjectIdentifier> = []
     /// The Chrome Web Store's pages, told when installs come and go. See StoreRelay.swift.
     var storeWatch: AnyCancellable?
     private var hush: DispatchWorkItem?
@@ -2172,6 +2174,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     func keep(_ download: WKDownload) {
         download.delegate = self
         downloading.append(download)
+        // Noted now, while its page is still there to ask: a private tab's
+        // download is saved where you say, and left out of the list.
+        if let web = download.webView, tab(for: web)?.shy == true { unlisted.insert(ObjectIdentifier(download)) }
     }
 
     /// Without this WebKit refuses every request out of hand, and a page that
@@ -2359,8 +2364,13 @@ extension Browser: WKDownloadDelegate {
 
     func downloadDidFinish(_ download: WKDownload) {
         downloading.removeAll { $0 === download }
+        let listed = unlisted.remove(ObjectIdentifier(download)) == nil
         guard let file = download.progress.fileURL else {
             announce("Download finished")
+            return
+        }
+        guard listed else {
+            announce("Saved \(file.lastPathComponent)")
             return
         }
         if #available(macOS 15.4, *), let asked = download.originalRequest?.url,
@@ -2384,6 +2394,7 @@ extension Browser: WKDownloadDelegate {
         resumeData: Data?
     ) {
         downloading.removeAll { $0 === download }
+        unlisted.remove(ObjectIdentifier(download))
         announce("Download failed")
     }
 
