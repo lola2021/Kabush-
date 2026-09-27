@@ -410,6 +410,10 @@ def main(argv):
         sys.exit(f"unknown command “{verb}” — see bench help")
 
     answer = ask(os.path.join(folder(world), "bench.sock"), request)
+    # A test run that let a window onto a screen has failed, whatever it was doing.
+    if answer.get("onScreen"):
+        print("error: a window came onto a screen in this test run — stop the probe: " + "; ".join(answer["onScreen"]), file=sys.stderr)
+        sys.exit(3)
     if "error" in answer:
         sys.exit("error: " + str(answer["error"]))
     if verb == "text":

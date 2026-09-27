@@ -189,6 +189,8 @@ final class Links: NSObject, NSApplicationDelegate {
     /// macOS 14.
     @MainActor
     private static func comeForward() {
+        // Never a test run's: a probe started hidden stays off every screen.
+        guard !Store.testing else { return }
         guard #available(macOS 14, *) else {
             NSApp.activate(ignoringOtherApps: true)
             return

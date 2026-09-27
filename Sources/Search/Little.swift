@@ -31,7 +31,8 @@ final class LittleWindow: NSObject, NSWindowDelegate {
         let little = LittleWindow(tab: tab, browser: browser)
         open.append(little)
         little.window.center()
-        guard front else { return }
+        // Never a test run's in front: a probe started hidden stays off every screen.
+        guard front, !Store.testing else { return }
         little.window.makeKeyAndOrderFront(nil)
         if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
     }

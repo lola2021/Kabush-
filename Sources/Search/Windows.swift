@@ -141,6 +141,7 @@ enum Browsers {
     static func show(_ browser: Browser) {
         browser.shut = false
         if let window = browser.window {
+            Bench.keepOff(window)
             window.makeKeyAndOrderFront(nil)
         } else if browser.inScene {
             _ = NSApp.delegate?.applicationOpenUntitledFile?(NSApp)
@@ -182,6 +183,7 @@ enum Browsers {
             window.center()
         }
         frames[ObjectIdentifier(browser)] = window
+        Bench.keepOff(window)
         window.makeKeyAndOrderFront(nil)
         comeForward()
     }

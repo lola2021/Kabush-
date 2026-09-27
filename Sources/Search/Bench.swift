@@ -107,6 +107,7 @@ final class Bench {
     func start(for browser: Browser) {
         guard !running else { return }
         self.browser = browser
+        if Store.testing { Bench.watchScreens() }
         // Nor App Nap, which a test run behind other windows falls into.
         if Store.testing, !Store.measuring, awake == nil {
             awake = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Bench")
@@ -234,6 +235,10 @@ final class Bench {
         private func say(_ answer: [String: Any]) {
             guard !answered else { return }
             answered = true
+            var answer = answer
+            // The socket's queue is the main one.
+            let caught = MainActor.assumeIsolated { Bench.caught }
+            if !caught.isEmpty { answer["onScreen"] = caught }
             var out = (try? JSONSerialization.data(withJSONObject: answer)) ?? Data("{\"error\":\"unwritable answer\"}".utf8)
             out.append(0x0A)
             out.withUnsafeBytes { raw in
@@ -279,6 +284,17 @@ final class Bench {
             return
         }
         let verb = request["do"] as? String ?? ""
+
+        // With pages shown (`pages on`) the app is no longer hidden: whatever
+        // opens or brings back a window would put it on the screen. Refused
+        // until `pages off`; listing and closing windows stay.
+        if Bench.pagesShown {
+            let action = request["action"] as? String ?? "list"
+            if ["little", "towindow"].contains(verb) || (verb == "windows" && !["list", "close"].contains(action)) {
+                answer(["error": "pages are on: run `pages off` before opening or bringing back a window"])
+                return
+            }
+        }
 
         switch verb {
         case "tabs":
@@ -1260,6 +1276,7 @@ final class Bench {
                 _ = room ?? makeRoom()
                 window.orderOut(nil)
                 for other in NSApp.windows where other !== room && onScreen(other) { other.orderOut(nil) }
+                Bench.pagesShown = true
                 NSApp.unhideWithoutActivation()
                 let showing = NSApp.windows.filter { $0.isVisible && onScreen($0) }
                 if !showing.isEmpty {
@@ -1270,6 +1287,7 @@ final class Bench {
                 answer(["pages": true])
             } else {
                 NSApp.hide(nil)
+                Bench.pagesShown = false
                 window.orderFront(nil)
                 answer(["pages": false])
             }
@@ -2224,6 +2242,62 @@ final class Bench {
     // MARK: - the room off screen
 
     private var room: NSWindow?
+
+    // MARK: - nothing on a screen
+
+    /// Set once `pages on` has shown a hidden probe again, so WebKit paints
+    /// its pages: from then on the app is no longer hidden, and a window
+    /// ordered in would come onto the screen.
+    static var pagesShown = false
+    /// Windows a test run let onto a screen. Every answer names them from
+    /// then on, and ./bench fails: a test must never show a window there.
+    private(set) static var caught: [String] = []
+    private static var watching: [NSObjectProtocol] = []
+
+    static func onScreen(_ window: NSWindow) -> Bool {
+        NSScreen.screens.contains { $0.frame.intersects(window.frame) }
+    }
+
+    /// A window about to be ordered in during a test run with pages shown
+    /// (Windows.open, Windows.show): the app hidden again first, so it
+    /// waits unseen. Moving it off the screen isn't enough — AppKit pulls a
+    /// titled window back onto one as it comes in. `pages on` again puts
+    /// every window away before it shows the app.
+    static func keepOff(_ window: NSWindow) {
+        guard Store.testing, pagesShown else { return }
+        NSApp.hide(nil)
+        pagesShown = false
+    }
+
+    /// Any other window that comes onto a screen in a test run — a sheet, a
+    /// panel, one made by a path nobody thought of: taken off at once and
+    /// named in every answer.
+    static func watchScreens() {
+        guard watching.isEmpty else { return }
+        // The app itself shown or brought forward by anything but `pages on`
+        // (which never activates it): hidden again at once.
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didUnhideNotification] {
+            watching.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                MainActor.assumeIsolated {
+                    if note.name == NSApplication.didUnhideNotification, pagesShown { return }
+                    caught.append("the app \(note.name == NSApplication.didUnhideNotification ? "shown" : "brought forward")")
+                    NSApp.hide(nil)
+                    pagesShown = false
+                }
+            })
+        }
+        watching.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main
+        ) { note in
+            MainActor.assumeIsolated {
+                guard let window = note.object as? NSWindow, window.isVisible,
+                      window.occlusionState.contains(.visible), onScreen(window) else { return }
+                caught.append("\(type(of: window)) “\(window.title)” at \(NSStringFromRect(window.frame))")
+                NSApp.hide(nil)
+                pagesShown = false
+            }
+        })
+    }
     /// Where `film float` lends the tab's stage, off every screen.
     private var hall: NSWindow?
 
