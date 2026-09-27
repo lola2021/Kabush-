@@ -303,7 +303,9 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       }
       function caret(scrolled) {
         var el = document.activeElement;
-        var both = pair();
+        // The boxes are only looked for with the caret in one: this runs on
+        // every frame of every scroll, and looking goes through the whole page.
+        var both = el && (el.tagName || '').toLowerCase() === 'input' ? pair() : null;
         var rect = null;
         var passwords = !!(both && el && (el === both.user || el === both.pass));
         if (passwords || forPasskeys(el)) {
