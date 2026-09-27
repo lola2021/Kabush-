@@ -59,6 +59,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The download button in the bar over a PDF saves the PDF to your downloads folder, or asks where first when Settings › Downloads says to, and lists it in Downloads. It did nothing. Thanks [@Aaditya2605](https://github.com/Aaditya2605) ([#290](https://github.com/driceroland/Search/pull/290), [#284](https://github.com/driceroland/Search/issues/284))
 - Clicking a bookmark whose address is missing or can't be read, which an extension can write and a bookmarks file can lose, does nothing instead of closing Search, as its line in the Bookmarks menu already did. Thanks [@Hyp4tia](https://github.com/Hyp4tia) ([#234](https://github.com/driceroland/Search/pull/234))
 - A pinned extension's popup opens from its button after you move the tabs from across the top to the column, or back, instead of from somewhere else in the window: the row being taken away kept the button's place for itself. Thanks [@kinnrai](https://github.com/kinnrai) ([#254](https://github.com/driceroland/Search/pull/254))
+- The `./bench` skill has coding agents put a page's picture in this account's own temporary folder instead of the shared `/tmp`, where anything else on the Mac could read a screenshot of a signed-in page or swap the file. Thanks [@Hyp4tia](https://github.com/Hyp4tia) ([#236](https://github.com/driceroland/Search/pull/236))
 
 ## 1.0.3 — 24 September 2026
 
