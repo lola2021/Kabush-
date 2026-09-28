@@ -75,10 +75,12 @@ enum SiteSearch {
         }
     }
 
-    /// The site the words typed so far begin the name of, if any: the start
-    /// of its name, its address or one of its other names, two letters at
-    /// least, nothing after a space. The built-in ones first, then the ones
-    /// learned; among them the one whose name is the shortest.
+    /// The site the words typed so far begin the name of, if any, two
+    /// letters at least, nothing after a space. A built-in one by the start
+    /// of its name, its address or one of its other names; a learned one by
+    /// the start of its address only — never by the name it gives itself,
+    /// which could be anyone's ("Google", a bank's). Among them the one whose
+    /// name is the shortest.
     static func match(_ typed: String) -> SearchSite? {
         let word = typed.trimmingCharacters(in: .whitespaces).lowercased()
         guard word.count >= 2, !word.contains(" "), !word.contains("/") else { return nil }
@@ -86,11 +88,9 @@ enum SiteSearch {
             let host = site.host.hasPrefix("www.") ? String(site.host.dropFirst(4)) : site.host
             return [site.name.lowercased().replacingOccurrences(of: " ", with: ""), host] + site.aliases
         }
-        for list in [builtIn, learned] {
-            let found = list.filter { site in names(site).contains { $0.hasPrefix(word) } }
-            if let best = found.min(by: { $0.name.count < $1.name.count }) { return best }
-        }
-        return nil
+        let found = builtIn.filter { site in names(site).contains { $0.hasPrefix(word) } }
+        if let best = found.min(by: { $0.name.count < $1.name.count }) { return best }
+        return learned.filter { $0.host.hasPrefix(word) }.min { $0.host.count < $1.host.count }
     }
 
     // MARK: - learned from sites you visit (OpenSearch)
@@ -103,7 +103,9 @@ enum SiteSearch {
     static var learned: [SearchSite] {
         if let loaded { return loaded }
         let read = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([SearchSite].self, from: $0) } ?? []
+        // Named by their address, whatever an earlier build wrote.
         let kept = read.filter { Keyword.accepts($0.template) && sameSite($0.template, $0.host) }
+            .map { SearchSite(name: $0.host, host: $0.host, template: $0.template) }
         loaded = kept
         return kept
     }
@@ -125,11 +127,12 @@ enum SiteSearch {
     static func learn(from page: URL, description: URL) {
         guard page.scheme == "https", description.scheme == "https",
               let host = siteHost(page.absoluteString), sameSite(description.absoluteString, host),
-              !builtIn.contains(where: { host.hasSuffix(bare($0.host)) }),
+              !builtIn.contains(where: { Vault.registrable(bare($0.host)) == Vault.registrable(host) }),
               !learned.contains(where: { $0.host == host }) else { return }
         var request = URLRequest(url: description, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpShouldHandleCookies = false
-        let session = URLSession(configuration: .ephemeral)
+        // Redirected only within the site: nothing is read from one not visited.
+        let session = URLSession(configuration: .ephemeral, delegate: SameSiteRedirects(host: host), delegateQueue: .main)
         session.dataTask(with: request) { data, response, _ in
             defer { session.finishTasksAndInvalidate() }
             guard let data, data.count <= 64 * 1024, (response as? HTTPURLResponse)?.statusCode == 200,
@@ -137,18 +140,23 @@ enum SiteSearch {
             let template = found.template
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    guard Keyword.accepts(template), sameSite(template, host),
-                          !learned.contains(where: { $0.host == host }) else { return }
-                    let name = found.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let site = SearchSite(name: name.isEmpty || name.count > 40 ? host : name, host: host, template: template)
-                    var list = learned + [site]
-                    if list.count > most { list.removeFirst(list.count - most) }
-                    loaded = list
-                    let snapshot = list
-                    Disk.write(file) { try? JSONEncoder().encode(snapshot) }
+                    adopt(host: host, template: template)
                 }
             }
         }.resume()
+    }
+
+    /// A learned site kept: named by its address, the only name it can't
+    /// choose for itself, so the row and the chip say where the words go.
+    /// (Its description's own name is left unread for that reason.)
+    static func adopt(host: String, template: String) {
+        guard Keyword.accepts(template), sameSite(template, host),
+              !learned.contains(where: { $0.host == host }) else { return }
+        var list = learned + [SearchSite(name: host, host: host, template: template)]
+        if list.count > most { list.removeFirst(list.count - most) }
+        loaded = list
+        let snapshot = list
+        Disk.write(file) { try? JSONEncoder().encode(snapshot) }
     }
 
     /// Forgotten, all of them: with the history (Browser.clearHistory).
@@ -170,12 +178,13 @@ enum SiteSearch {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    /// `address` is on `host` or one of its own subdomains — never another
-    /// site's — so the words go where the page said they would.
+    /// `address` is on the same site as `host` — the same registrable
+    /// domain, as the public suffix list has it, so foo.github.io can't name
+    /// github.io — and so the words go where the page said they would.
     static func sameSite(_ address: String, _ host: String) -> Bool {
         guard let other = siteHost(address) else { return false }
         let mine = bare(host)
-        return other == mine || other.hasSuffix("." + mine) || mine.hasSuffix("." + other)
+        return other == mine || Vault.registrable(other) == Vault.registrable(mine)
     }
 }
 
@@ -223,5 +232,20 @@ enum OpenSearch {
             let local = element.split(separator: ":").last.map(String.init) ?? element
             if local == "ShortName" { inName = false }
         }
+    }
+}
+
+/// A description's fetch, redirected only within the site it was asked of.
+private final class SameSiteRedirects: NSObject, URLSessionTaskDelegate {
+    let host: String
+    init(host: String) { self.host = host }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        let next = request.url
+        let allowed = next?.scheme == "https" && next.map { url in
+            MainActor.assumeIsolated { SiteSearch.sameSite(url.absoluteString, host) }
+        } == true
+        completionHandler(allowed ? request : nil)
     }
 }

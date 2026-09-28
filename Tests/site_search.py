@@ -62,9 +62,23 @@ def main():
         s = site("learn", page="https://duckduckgo.com/", description="https://duckduckgo.com/opensearch.xml")
         learned = s["learned"]
         t.ok("a site's own description: it joins the list", learned and learned[0][1] == "duckduckgo.com" and "%s" in learned[0][2], learned)
-        field("duck"); time.sleep(0.2)
-        t.ok("…and is offered by name", site()["offer"] != "", site()["offer"])
+        field("duckd"); time.sleep(0.2)
+        t.ok("…and is offered by its address", site()["offer"] == "duckduckgo.com", site()["offer"])
         site("esc"); site("forget")
+        # A learned site is named and matched by its address only, never by
+        # the name its description gives itself ("Google", a bank's).
+        s = site("adopt", host="lookalike.example", template="https://lookalike.example/?q=%s")
+        t.ok("a learned site is named by its address", s["learned"] and s["learned"][0][0] == "lookalike.example", s["learned"])
+        for typed in ["goo", "kag", "chase"]:
+            field(typed); time.sleep(0.2)
+            t.ok(f"typing {typed!r} never offers the learned site", site()["offer"] != "lookalike.example", site()["offer"])
+            site("esc")
+        field("looka"); time.sleep(0.2)
+        t.ok("typing its address offers it, by its address", site()["offer"] == "lookalike.example", site()["offer"])
+        site("esc")
+        s = site("adopt", host="foo.github.io", template="https://github.io/?q=%s")
+        t.ok("a page can't name a public suffix above it (github.io)", not any(l[1] == "foo.github.io" for l in s["learned"]), s["learned"])
+        site("forget")
         # visiting its home page in an ordinary tab is enough
         sv.sp("open", url="https://search.brave.com/"); time.sleep(6)
         learned = site()["learned"]

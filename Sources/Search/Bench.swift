@@ -924,6 +924,11 @@ final class Bench {
                 }
                 SiteSearch.learn(from: page, description: description)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { answer(state()) }
+            case "adopt":
+                // A learned site kept as learn keeps one, past the fetch: the
+                // name a description gives itself is never read.
+                SiteSearch.adopt(host: request["host"] as? String ?? "", template: request["template"] as? String ?? "")
+                answer(state())
             case "forget": SiteSearch.forget(); answer(state())
             default: answer(state())
             }
