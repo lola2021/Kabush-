@@ -1351,8 +1351,7 @@ final class Snapshot {
     private let folder: URL
 
     init(of source: URL) throws {
-        folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("office-import-\(UUID().uuidString)", isDirectory: true)
+        folder = ImportFile.scratchFolder()
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         file = folder.appendingPathComponent(source.lastPathComponent)
         do {

@@ -605,6 +605,9 @@ struct ContentView: View {
             .overlay { field }
             .overlay { panels }
             .overlay { TabSwitcherOverlay(browser: browser, switcher: browser.tabSwitcher) }
+            .overlay(alignment: .topTrailing) {
+                if let job = browser.fileImport { ImportProgress(browser: browser, job: job) }
+            }
             // The field comes on its spring, and goes quickly: once Return
             // is pressed the page is on its way, and the field is not what
             // there is to watch.
@@ -1480,5 +1483,76 @@ struct SceneRoot: View {
         ContentView(browser: slot.browser)
             .id(ObjectIdentifier(slot.browser))
             .onAppear { Browsers.restoreOnce() }
+    }
+}
+
+/// A file being brought in, in the background (#380): its name, how far it
+/// has got, and Cancel — in the corner, in the quiet grey of everything
+/// else that floats over the page.
+private struct ImportProgress: View {
+    @ObservedObject var browser: Browser
+    let job: Browser.FileImportJob
+
+    private var fraction: CGFloat? {
+        guard let total = job.total, total > 0 else { return nil }
+        return min(1, CGFloat(job.completed) / CGFloat(total))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(job.filename)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.ink)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(job.message)
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+            bar
+            footer
+        }
+        .padding(14)
+        .frame(width: 250, alignment: .leading)
+        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+        .shadow(color: .black.opacity(0.08), radius: 16, y: 5)
+        .padding(20)
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Importing \(job.filename), \(job.message)")
+    }
+
+    private var bar: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Palette.hairline)
+                if let fraction {
+                    Capsule().fill(Palette.ink.opacity(0.7)).frame(width: geo.size.width * fraction)
+                }
+            }
+        }
+        .frame(height: 3)
+    }
+
+    private var footer: some View {
+        HStack {
+            if let total = job.total, total > 0 {
+                Text("\(job.completed.formatted()) of \(total.formatted())")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.muted)
+            }
+            Spacer(minLength: 0)
+            Button { browser.cancelFileImport() } label: {
+                Text(job.cancelling ? "Cancelling…" : "Cancel")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.ink)
+                    .padding(.horizontal, 10)
+                    .frame(height: 22)
+                    .background(Palette.ink.opacity(0.07), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(job.cancelling)
+        }
     }
 }

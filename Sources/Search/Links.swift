@@ -16,12 +16,37 @@ final class Links: NSObject, NSApplicationDelegate {
     @MainActor static var window: NSWindow? { Browsers.front?.window ?? Browsers.primary?.window }
     /// Whether the window has been asked for on a link's behalf (summon).
     private static var summoned = false
+    /// A first quit waits for an import worker to remove its temporary files.
+    /// AppKit calls us again when that cleanup has finished.
+    private var terminationPending = false
 
     /// Quitting closes every window on the way out; that isn't a window
     /// closed for good, whose tabs would go (see Browsers.closing).
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        MainActor.assumeIsolated { Browsers.quitting = true }
-        return .terminateNow
+        let waiting = MainActor.assumeIsolated {
+            Browsers.quitting = true
+            return Browser.cancelAllFileImports()
+        }
+        guard waiting else {
+            terminationPending = false
+            return .terminateNow
+        }
+        if !terminationPending {
+            terminationPending = true
+            Task { @MainActor in
+                // Five seconds at most: an import stuck on a slow disk
+                // doesn't keep Search from quitting.
+                let until = Date().addingTimeInterval(5)
+                while Browser.hasActiveFileImports, Date() < until {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                self.terminationPending = false
+                sender.terminate(nil)
+            }
+        }
+        // Returning from AppKit's first terminate call lets MainActor finish
+        // the worker continuation and remove it from Browser's registry.
+        return .terminateCancel
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -72,6 +97,10 @@ final class Links: NSObject, NSApplicationDelegate {
     /// window is asked for here instead; started hidden, it stays hidden
     /// with the app until the app is shown.
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // What an import left in the temporary folder when Search stopped
+        // in the middle of it — a Safari export's passwords in the clear
+        // among it — goes (Security).
+        DispatchQueue.global(qos: .utility).async { ImportFile.sweepScratch() }
         let plain = notification.userInfo?[NSApplication.launchIsDefaultUserInfoKey] as? Bool ?? true
         guard !plain else { return }
         DispatchQueue.main.async {

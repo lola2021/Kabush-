@@ -46,3 +46,13 @@ enum Store {
         try? FileManager.default.moveItem(at: url, to: url.appendingPathExtension("corrupt"))
     }
 }
+
+// History schedules its saves itself. Keep this runner's isolated write
+// synchronous so savedFile() can inspect the bytes after that delay.
+enum Disk {
+    static func write(_ file: URL, now: Bool = false, _ encode: @escaping @Sendable () -> Data?) {
+        guard let data = encode() else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+    }
+}
