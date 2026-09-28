@@ -39,6 +39,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Copy Image works on pictures a page makes itself, such as the photos in WhatsApp Web: it said it couldn't copy them, since they only exist inside the page, and they are now read there.
 - A pinned tab you drag to another place keeps up with the pointer, as a tab does: each move of the hand redrew the whole column.
 - Tampermonkey installs a script from a link on Greasy Fork, OpenUserJS, GitHub, GitLab and the other script sites it knows, as in Chrome: the rules it catches those links with weren't in a form WebKit takes, so none of them loaded. A .user.js link anywhere else still needs the script pasted into its editor, since WebKit can't hold that one rule beside the others.
+- Escape on a new tab you haven't typed in or gone anywhere from closes it and takes you back to the tab you were on, as if the ⌘T hadn't happened. Anything typed keeps it, and so does it being the only tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#393](https://github.com/driceroland/Search/pull/393), [#389](https://github.com/driceroland/Search/issues/389))
 
 ## 1.0.4 — 27 September 2026
 
