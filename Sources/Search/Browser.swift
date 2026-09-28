@@ -4173,7 +4173,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     @objc(_webView:requestNotificationPermissionForSecurityOrigin:decisionHandler:)
     func askedForNotifications(_ webView: WKWebView, origin: WKSecurityOrigin, decisionHandler: @escaping (Bool) -> Void) {
         let site = Browser.origin(origin.protocol, origin.host, origin.port)
-        guard prefs.siteNotifications, let tab = tab(for: webView), !tab.shy, !origin.host.isEmpty,
+        guard prefs.siteNotifications, let tab = tab(for: webView), !tab.shy, webView.configuration.websiteDataStore.isPersistent,
+              !origin.host.isEmpty,
               let page = webView.url, let scheme = page.scheme, let host = page.host(),
               Browser.origin(scheme, host, page.port ?? 0) == site
         else { return decisionHandler(false) }

@@ -28,7 +28,7 @@ final class SiteNotifications: NSObject {
     private(set) var recorded: [[String: String]] = []
 
     /// The store each shown notification came from, for its click.
-    private var stores: [String: WKWebsiteDataStore] = [:]
+    fileprivate var stores: [String: WKWebsiteDataStore] = [:]
     private var authorized = false
 
     // MARK: - choices
@@ -81,10 +81,8 @@ final class SiteNotifications: NSObject {
     /// WebKit asks, as a store opens, what each site was told.
     @objc(notificationPermissionsForWebsiteDataStore:)
     nonisolated func permissions(_ store: WKWebsiteDataStore) -> NSDictionary {
-        MainActor.assumeIsolated {
-            guard on else { return [:] as NSDictionary }
-            return SiteNotifications.choices.mapValues { NSNumber(value: $0) } as NSDictionary
-        }
+        let choices = MainActor.assumeIsolated { on ? SiteNotifications.choices : [:] }
+        return choices.mapValues { NSNumber(value: $0) } as NSDictionary
     }
 
     /// A service worker's notification.
@@ -95,7 +93,8 @@ final class SiteNotifications: NSObject {
             let origin = text("origin")
             // Only an origin you allowed, and only while the switch is on.
             guard on, SiteNotifications.choices[origin] == true else { return }
-            let id = (data.value(forKey: "identifier") as? NSObject).map { "\($0)" } ?? UUID().uuidString
+            let id = (data.responds(to: NSSelectorFromString("identifier")) ? data.value(forKey: "identifier") as? NSObject : nil)
+                .map { "\($0)" } ?? UUID().uuidString
             let dictionary = data.responds(to: NSSelectorFromString("dictionaryRepresentation"))
                 ? data.perform(NSSelectorFromString("dictionaryRepresentation"))?.takeUnretainedValue() as? NSDictionary : nil
             stores[id] = store
@@ -108,8 +107,8 @@ final class SiteNotifications: NSObject {
     /// What a service worker's getNotifications() finds.
     @objc(websiteDataStore:getDisplayedNotificationsForWorkerOrigin:completionHandler:)
     nonisolated func displayed(_ store: WKWebsiteDataStore, origin: WKSecurityOrigin, completionHandler: @escaping ([NSDictionary]) -> Void) {
-        let site = "\(origin.protocol)://\(origin.host)" + (origin.port == 0 ? "" : ":\(origin.port)")
-        if MainActor.assumeIsolated({ Store.testing }) { return completionHandler([]) }
+        let site = MainActor.assumeIsolated { Store.testing ? nil : Browser.origin(origin.protocol, origin.host, origin.port) }
+        guard let site else { return completionHandler([]) }
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let found = delivered.compactMap { note -> NSDictionary? in
                 let info = note.request.content.userInfo
@@ -126,7 +125,11 @@ final class SiteNotifications: NSObject {
     nonisolated func openWindow(_ store: WKWebsiteDataStore, url: URL, origin: WKSecurityOrigin, completionHandler: @escaping (WKWebView?) -> Void) {
         MainActor.assumeIsolated {
             guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""), !Store.testing else { return completionHandler(nil) }
-            let browser = Browsers.ensureWindow()
+            // A window whose space signs in with the worker's store: the page
+            // it opens must be the same person's, not the front window's.
+            let fits = Browsers.all.filter { $0.extensionPopup == nil && Spaces.store(for: $0.spaceID) === store }
+            guard let browser = fits.first(where: { $0 === Browsers.front && $0.isOpen }) ?? fits.last(where: \.isOpen) ?? fits.first
+            else { return completionHandler(nil) }
             let tab = browser.open(url, foreground: true)
             Browsers.show(browser)
             completionHandler(tab.web)
@@ -141,6 +144,8 @@ final class SiteNotifications: NSObject {
             return
         }
         let content = UNMutableNotificationContent()
+        var info = info
+        info["search.key"] = id
         content.title = title
         content.body = body
         let url = URL(string: origin)
@@ -173,25 +178,24 @@ final class SiteNotifications: NSObject {
     /// Clicked: the site's tab in front, and the click to its worker.
     func clicked(_ info: [AnyHashable: Any]) {
         let origin = info["search.origin"] as? String ?? ""
-        bringForward(origin)
+        let key = info["search.key"] as? String
+        let from = key.flatMap { stores.removeValue(forKey: $0) }
+        bringForward(origin, from: from)
         if info["search.kind"] as? String == "page", let id = (info["search.id"] as? String).flatMap(UInt64.init) {
             return PageNotifications.clicked(id)
         }
         guard info["search.kind"] as? String == "worker", let data = info["search.data"] as? NSDictionary else { return }
-        let store = (info["search.id"] as? String).flatMap { stores[$0] } ?? Store.websites
-        SiteNotifications.tell(store, "_processPersistentNotificationClick:completionHandler:", data)
+        SiteNotifications.tell(from ?? Store.websites, "_processPersistentNotificationClick:completionHandler:", data)
     }
 
     /// Dismissed: the worker hears its notification closed.
     func closed(_ info: [AnyHashable: Any]) {
+        let from = (info["search.key"] as? String).flatMap { stores.removeValue(forKey: $0) }
         if info["search.kind"] as? String == "page", let id = (info["search.id"] as? String).flatMap(UInt64.init) {
             return PageNotifications.closed(id)
         }
         guard info["search.kind"] as? String == "worker", let data = info["search.data"] as? NSDictionary else { return }
-        let id = info["search.id"] as? String
-        let store = id.flatMap { stores[$0] } ?? Store.websites
-        if let id { stores[id] = nil }
-        SiteNotifications.tell(store, "_processPersistentNotificationClose:completionHandler:", data)
+        SiteNotifications.tell(from ?? Store.websites, "_processPersistentNotificationClose:completionHandler:", data)
     }
 
     private typealias Deliver = @convention(c) (AnyObject, Selector, NSDictionary, @escaping @convention(block) (Bool) -> Void) -> Void
@@ -202,22 +206,23 @@ final class SiteNotifications: NSObject {
         unsafeBitCast(method, to: Deliver.self)(store, selector, data) { _ in }
     }
 
-    /// The tab showing the site, in whichever window has it, in front.
-    private func bringForward(_ origin: String) {
-        for browser in Browsers.all where browser.extensionPopup == nil {
-            guard let tab = browser.tabs.first(where: { tab in
-                guard let url = tab.address, let scheme = url.scheme, let host = url.host() else { return false }
+    /// The tab showing the site in front: one signed in with the store the
+    /// notification came from if there is one, never a private tab.
+    private func bringForward(_ origin: String, from store: WKWebsiteDataStore?) {
+        let found = Browsers.all.filter { $0.extensionPopup == nil }.flatMap { browser in
+            browser.tabs.filter { tab in
+                guard !tab.shy, tab.store.isPersistent, let url = tab.address, let scheme = url.scheme, let host = url.host() else { return false }
                 return Browser.origin(scheme, host, url.port ?? 0) == origin
-            }) else { continue }
-            browser.select(tab)
-            Browsers.show(browser)
-            NSApp.activate()
-            return
+            }.map { (browser, $0) }
         }
+        guard let (browser, tab) = found.first(where: { $0.1.store === store }) ?? found.first else { return }
+        browser.select(tab)
+        Browsers.show(browser)
+        NSApp.activate()
     }
 }
 
-extension SiteNotifications: @preconcurrency UNUserNotificationCenterDelegate {
+extension SiteNotifications: UNUserNotificationCenterDelegate {
     /// Shown even with Search in front, as a browser's are.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                             withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
@@ -226,7 +231,7 @@ extension SiteNotifications: @preconcurrency UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                             withCompletionHandler completionHandler: @escaping () -> Void) {
-        let info = response.notification.request.content.userInfo
+        nonisolated(unsafe) let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
@@ -276,6 +281,9 @@ private struct WebKitC {
     let boolean: @convention(c) (Bool) -> Ref?
     let string: @convention(c) (CFString) -> Ref?
     let release: @convention(c) (Ref) -> Void
+    /// Optional: a service worker's notification, which the store's
+    /// delegate posts, is left alone here.
+    let persistent: (@convention(c) (Ref) -> Bool)?
 
     static let loaded: WebKitC? = {
         let webkit = dlopen("/System/Library/Frameworks/WebKit.framework/WebKit", RTLD_NOW)
@@ -308,7 +316,8 @@ private struct WebKitC {
                        id: id, origin: origin, originString: originString, cfString: cfString, didShow: didShow,
                        didClick: didClick, didClose: didClose, uint64: uint64, uint64Value: uint64Value, array: array,
                        arraySize: arraySize, arrayItem: arrayItem, dictionary: dictionary, setItem: setItem,
-                       boolean: boolean, string: string, release: release)
+                       boolean: boolean, string: string, release: release,
+                       persistent: f("WKNotificationGetIsPersistent"))
     }()
 
     /// A WKString copied out, and the copy let go.
@@ -345,7 +354,8 @@ enum PageNotifications {
         }
         let ignored: @convention(c) (Ref?, UnsafeRawPointer?) -> Void = { _, _ in }
         let permissions: @convention(c) (UnsafeRawPointer?) -> Ref? = { _ in
-            MainActor.assumeIsolated { PageNotifications.permissions() }
+            // Handed across as an address: the dictionary is WebKit's from here.
+            UnsafeMutableRawPointer(bitPattern: MainActor.assumeIsolated { PageNotifications.permissions().map { UInt(bitPattern: $0) } ?? 0 })
         }
         let clear: @convention(c) (Ref?, UnsafeRawPointer?) -> Void = { ids, _ in
             guard let ids else { return }
@@ -389,7 +399,8 @@ enum PageNotifications {
     }
 
     private static func show(_ page: Ref, _ note: Ref) {
-        guard let c = WebKitC.loaded, let context = c.pageContext(page), let manager = c.manager(context) else { return }
+        guard let c = WebKitC.loaded, c.persistent?(note) != true,
+              let context = c.pageContext(page), let manager = c.manager(context) else { return }
         let origin = origin(of: note, c)
         // Only a site you allowed, while the switch is on, and never from a
         // private tab, which shares the process pool but keeps nothing.
@@ -401,6 +412,7 @@ enum PageNotifications {
                                       origin: origin, tag: c.text(c.tag(note)),
                                       info: ["search.kind": "page", "search.id": String(id), "search.origin": origin])
         shown[id] = manager
+        SiteNotifications.shared.stores["page|\(id)"] = web.configuration.websiteDataStore
         c.didShow(manager, id)
     }
 
@@ -412,6 +424,7 @@ enum PageNotifications {
         guard let c = WebKitC.loaded else { return }
         let id = c.id(note)
         forget(id)
+        SiteNotifications.shared.stores["page|\(id)"] = nil
         closed(id)
     }
 
@@ -423,16 +436,16 @@ enum PageNotifications {
             let id = c.uint64Value(item)
             forget(id)
             shown[id] = nil
+            SiteNotifications.shared.stores["page|\(id)"] = nil
         }
     }
 
     private static func forget(_ id: UInt64) {
         guard !Store.testing else { return }
-        let center = UNUserNotificationCenter.current()
-        center.getDeliveredNotifications { delivered in
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let gone = delivered.filter { $0.request.content.userInfo["search.id"] as? String == String(id)
                 && $0.request.content.userInfo["search.kind"] as? String == "page" }.map(\.request.identifier)
-            center.removeDeliveredNotifications(withIdentifiers: gone)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: gone)
         }
     }
 
