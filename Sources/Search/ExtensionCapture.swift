@@ -17,7 +17,8 @@ import WebKit
 // the Mac, not Search, that asks what to share. The stream stays in the page
 // and is handed over as the answer to the extension's getUserMedia.
 //
-// While an extension records, a small pill says so and stops it.
+// While an extension records, a small pill says so and stops it
+// (RecordingIndicator.swift, which shows what this watches).
 //
 // Nothing here uses ScreenCaptureKit or looks at other windows: WebKit's
 // picker is the only way in, and it needs no Screen Recording permission.
@@ -29,6 +30,11 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     static let shared = ExtensionCapture()
     /// The name the pages post to (window.webkit.messageHandlers).
     static let channel = "searchCapture"
+
+    override private init() {
+        super.init()
+        RecordingIndicator.shared.onStop = { [weak self] id in self?.stop(id) }
+    }
 
     // MARK: - asking, once per extension
 
@@ -47,6 +53,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     /// Taken back: asked again the next time it wants to record.
     static func forget(_ id: String) {
         Store.settings.removeObject(forKey: key(id))
+        shared.refused.remove(id)
         shared.objectWillChange.send()
     }
 
@@ -60,10 +67,18 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
 
     /// Yes from you: now, or before and you have just done something in
     /// Search — a remembered yes is never used by an extension on its own.
+    private var refused: Set<String> = []
+
     private func consent(_ context: WKWebExtensionContext) async -> Bool {
         let id = context.uniqueIdentifier
         if ExtensionCapture.allowed(id) { return Store.testing || Extensions.recentlyUsed(within: 15) }
-        guard await Extensions.shared.ask(capture: context) else { return false }
+        // Refused once, not asked again until Search starts afresh: an
+        // extension can't wear you down with the question.
+        guard !refused.contains(id) else { return false }
+        guard await Extensions.shared.ask(capture: context) else {
+            refused.insert(id)
+            return false
+        }
         Store.settings.set(true, forKey: ExtensionCapture.key(id))
         objectWillChange.send()
         return true
@@ -266,7 +281,9 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         let now = by.values.sorted { $0.name < $1.name }
         guard now != recordings else { return }
         recordings = now
-        RecordingPill.update(now)
+        // The pill, and the mark on each recording tab (RecordingIndicator).
+        RecordingIndicator.shared.update(now.map { RecordingLine(id: $0.id, name: $0.name, what: $0.what) },
+                                         pages: now.flatMap { webViews(of: $0.id) })
     }
 
     /// The pages of an extension that are capturing now: for the mark on
@@ -301,7 +318,8 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     var state: [String: Any] {
         ["grants": grants.count, "last": last,
          "recordings": recordings.map { ["id": $0.id, "what": $0.what] },
-         "allowed": ExtensionCapture.allowedIDs]
+         "allowed": ExtensionCapture.allowedIDs,
+         "pill": RecordingIndicator.shared.lines.map { "\($0.name) \($0.what)" }]
     }
 
     // MARK: - test runs
@@ -318,77 +336,5 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
             typealias Set = @convention(c) (AnyObject, Selector, Bool) -> Void
             unsafeBitCast(method, to: Set.self)(preferences, selector, on)
         }
-    }
-}
-
-// MARK: - the pill
-
-/// "● Loom is recording your screen — Stop": a small panel at the top of
-/// the screen for as long as an extension records, never taking the focus.
-@available(macOS 15.4, *)
-@MainActor
-enum RecordingPill {
-    private static var panel: NSPanel?
-
-    static func update(_ recordings: [ExtensionCapture.Recording]) {
-        // A test run shows nothing on anyone's screen.
-        guard !Store.testing else { return }
-        guard !recordings.isEmpty else {
-            panel?.orderOut(nil)
-            panel = nil
-            return
-        }
-        let host = NSHostingView(rootView: RecordingPillView(recordings: recordings) { ExtensionCapture.shared.stop($0) })
-        let size = host.fittingSize
-        let made = panel ?? {
-            let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            p.isFloatingPanel = true
-            p.level = .statusBar
-            p.backgroundColor = .clear
-            p.isOpaque = false
-            p.hasShadow = true
-            p.hidesOnDeactivate = false
-            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-            return p
-        }()
-        made.contentView = host
-        made.setContentSize(size)
-        if let screen = NSScreen.main {
-            let area = screen.visibleFrame
-            made.setFrameOrigin(NSPoint(x: area.midX - size.width / 2, y: area.maxY - size.height - 8))
-        }
-        made.orderFrontRegardless()
-        panel = made
-    }
-}
-
-@available(macOS 15.4, *)
-struct RecordingPillView: View {
-    let recordings: [ExtensionCapture.Recording]
-    let stop: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(recordings) { recording in
-                HStack(spacing: 8) {
-                    Circle().fill(Color.red).frame(width: 7, height: 7)
-                    Text("\(recording.name) \(recording.what)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.ink)
-                        .lineLimit(1)
-                    Text("—").font(.system(size: 12)).foregroundStyle(Palette.faint)
-                    Button("Stop") { stop(recording.id) }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Palette.wash))
-        .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 0.5))
-        .fixedSize()
     }
 }
