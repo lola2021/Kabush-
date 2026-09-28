@@ -1482,7 +1482,12 @@ final class PageView: WKWebView {
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
     /// Told when the keys come to this page, however they got here — a
-    /// click, or Tab walked past the other page's last field.
+    /// click, or Tab walked past the other page's last field. With two
+    /// pages up it makes this one the focused page (Browser.prepare), which
+    /// is safe only because a page can't ask for the keys itself: Search
+    /// doesn't implement WebKit's focus request, so element.focus() and
+    /// window.focus() never make this view first responder. If that is ever
+    /// added, it must not do so for the page that isn't focused.
     var onKeys: (() -> Void)?
 
     override func becomeFirstResponder() -> Bool {
