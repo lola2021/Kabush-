@@ -1530,25 +1530,34 @@ final class PageView: WKWebView {
 
     // MARK: - keys the page didn't use
 
-    /// The last key handed to the page. WebKit sends a key the page didn't
+    /// The keys lately handed to the page. WebKit sends a key the page didn't
     /// use back up the responder chain — the same event, a second time —
     /// where nothing takes it and macOS plays its "can't do that" sound.
     /// Editors that put the text in themselves (X's reply box, anything built
-    /// on Draft.js) leave WebKit thinking their keys unused, so typing into
-    /// them beeped. Safari keeps those quiet, and so does this view. The
-    /// app's own shortcuts never get this far: its key monitor takes them
-    /// before the page sees the key.
-    private var handed: NSEvent?
+    /// on Draft.js) leave WebKit thinking their keys unused, and so does a
+    /// game that moves on the arrows without saying so (#402). Safari keeps
+    /// those quiet, and so does this view. The app's own shortcuts never get
+    /// this far: its key monitor takes them before the page sees the key.
+    ///
+    /// Several, not the last one: WebKit answers a moment later, and keys
+    /// pressed quickly — or held, repeating — arrive before the answer for
+    /// the one before. Remembering only the last, every earlier key beeped.
+    private var handed: [NSEvent] = []
     /// How many came back unused and were kept quiet, for the bench.
     static var quieted = 0
 
     override func keyDown(with event: NSEvent) {
-        if let handed, PageView.same(handed, event) {
-            self.handed = nil
+        if let index = handed.firstIndex(where: { PageView.same($0, event) }) {
+            handed.remove(at: index)
             PageView.quieted += 1
             return
         }
-        handed = event
+        handed.append(event)
+        // A key the page did use never comes back: only the latest few are
+        // kept, and none older than a couple of seconds.
+        let now = event.timestamp
+        handed.removeAll { now - $0.timestamp > 2 }
+        if handed.count > 32 { handed.removeFirst(handed.count - 32) }
         super.keyDown(with: event)
     }
 
