@@ -75,7 +75,9 @@ extension Browser {
         if tab.floating || floating == tab.id { return "its video is out" }
         if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return "on a call" }
         if downloading.contains(where: { $0.webView === web }) { return "downloading" }
-        if heldDialogs[tab.id]?.isEmpty == false { return "a question waiting" }
+        if heldDialogs[tab.id]?.isEmpty == false || paneQuestions.contains(where: { $0.tab == tab.id }) {
+            return "a question waiting"
+        }
         // A sign-in window hands its answer back to the page that opened it.
         if let pair = activeSplit {
             if tabs.contains(where: { pair.contains($0.id) && $0.opener == tab.id }) {

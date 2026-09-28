@@ -2431,6 +2431,23 @@ final class Bench {
             guard let page = tab() else { answer(["error": "split closeOthers needs id"]); return }
             browser.closeOthers(but: page)
             reply()
+        case "pose":
+            // A card as a page's question would put up, with no page waiting
+            // on it: a page that asks is held by WebKit until it is answered,
+            // and a picture of the window would wait on it too.
+            guard let page = tab() else { answer(["error": "split pose needs id"]); return }
+            browser.paneQuestions.append(PaneQuestion(
+                tab: page.id, host: request["host"] as? String ?? "example.com",
+                message: request["message"] as? String ?? "", kind: .confirm, reply: { _, _ in }
+            ))
+            reply()
+        case "answer":
+            // The first question the page asked, answered as its card would.
+            guard let page = tab(), let question = browser.paneQuestions.first(where: { $0.tab == page.id }) else {
+                answer(["error": "split answer needs the id of a page with a question"]); return
+            }
+            browser.answer(question, ok: request["ok"] as? Bool ?? true, text: request["text"] as? String)
+            reply()
         case "swap": browser.swapSplit(); reply()
         case "even": browser.evenSplit(); reply()
         case "closeBoth": browser.closeSplit(); reply()
@@ -2493,6 +2510,14 @@ final class Bench {
             "needle": browser.needle,
             "findStatus": browser.findStatus ?? "",
             "pins": browser.tabs.filter { $0.pin != nil }.map { Bench.short($0) },
+            // What pages of the pair asked, oldest first (see PaneQuestion).
+            "questions": browser.paneQuestions.map { question in
+                ["tab": short(question.tab), "host": question.host, "message": question.message,
+                 "kind": { switch question.kind { case .alert: "alert"; case .confirm: "confirm"; case .prompt: "prompt" } }()]
+            },
+            "held": browser.heldDialogs.mapValues(\.count).reduce(into: [String: Int]()) { out, entry in
+                if let tab = browser.tabs.first(where: { $0.id == entry.key }) { out[Bench.short(tab)] = entry.value }
+            },
             "paneFrames": browser.tabs.compactMap { tab -> [String: Any]? in
                 guard let web = tab.built, let window = browser.window, web.window === window else { return nil }
                 let frame = web.convert(web.bounds, to: nil)

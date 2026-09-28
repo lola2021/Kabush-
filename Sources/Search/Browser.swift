@@ -1274,6 +1274,9 @@ final class Browser: NSObject, ObservableObject {
     /// alert(), confirm() and prompt() from tabs that weren't in front,
     /// waiting for them to be (see Dialogs.swift).
     var heldDialogs: [Tab.ID: [HeldQuestion]] = [:]
+    /// Questions asked by a page of the pair on screen, each drawn over its
+    /// own page, oldest first (see Dialogs.swift).
+    @Published var paneQuestions: [PaneQuestion] = []
     /// What handOff decided, in a test run, for the bench.
     static var handedOff: [String] = []
     /// Downloads from private tabs, which the Downloads list never shows.
@@ -1552,7 +1555,10 @@ final class Browser: NSObject, ObservableObject {
                 // Off, the pairs stay, as groups do; back on, the ones that
                 // came apart meanwhile go. The others' files are looked at
                 // when their spaces come back (see restoreRow).
-                guard let self, on else { return }
+                guard let self else { return }
+                // Off, no page is drawn over on its own: what a page asked
+                // is answered as dismissed rather than left unanswered.
+                guard on else { return dropQuestions() }
                 splits = splits.filter { Browser.holds($0, in: self.tabs) }
                 for key in parked.keys {
                     if let row = parked[key] { parked[key]?.splits = row.splits.filter { Browser.holds($0, in: row.tabs) } }
@@ -2348,6 +2354,7 @@ final class Browser: NSObject, ObservableObject {
         let partner = pair.flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
         heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
+        dropQuestions(for: tab.id)
 
         // A tab whose page is out in the little window takes the window with
         // it. Left alone, the window would go on holding a page belonging to a

@@ -35,7 +35,76 @@ final class HeldQuestion {
     deinit { drop?() }
 }
 
+/// A question from a page of the pair on screen, drawn over that page alone
+/// (see PaneQuestionCard), so the other page goes on working. Answered
+/// exactly once, whatever happens to it: WebKit wants every one answered,
+/// and answering twice would crash the page. Let go unanswered — the page
+/// closed, gone elsewhere, Split View turned off — it answers as dismissed.
+@MainActor
+final class PaneQuestion: Identifiable {
+    enum Kind: Equatable { case alert, confirm, prompt(String) }
+
+    let id = UUID()
+    let tab: Tab.ID
+    /// The site asking: the frame's own origin, never the page's address,
+    /// so a frame from another site is named as itself.
+    let host: String
+    let message: String
+    let kind: Kind
+    let asked = Date()
+    private var reply: ((Bool, String?) -> Void)?
+
+    init(tab: Tab.ID, host: String, message: String, kind: Kind, reply: @escaping (Bool, String?) -> Void) {
+        self.tab = tab
+        self.host = host
+        self.message = message
+        self.kind = kind
+        self.reply = reply
+    }
+
+    var open: Bool { reply != nil }
+
+    func answer(ok: Bool, text: String? = nil) {
+        let reply = reply
+        self.reply = nil
+        reply?(ok, text)
+    }
+
+    deinit { reply?(false, nil) }
+}
+
 extension Browser {
+    // MARK: - asked over one page of a pair
+
+    /// The tab asking, when it is a page of the pair on screen: its question
+    /// goes over it, not over the window.
+    private func paneAsking(_ webView: WKWebView) -> Tab? {
+        guard let pair = activeSplit,
+              let tab = tabs.first(where: { $0.built === webView }), pair.contains(tab.id) else { return nil }
+        return tab
+    }
+
+    private func askInPane(_ tab: Tab, frame: WKFrameInfo, message: String, kind: PaneQuestion.Kind,
+                           reply: @escaping (Bool, String?) -> Void) {
+        let host = frame.securityOrigin.host
+        paneQuestions.append(PaneQuestion(tab: tab.id, host: host, message: message, kind: kind, reply: reply))
+    }
+
+    /// The card's buttons, and the bench.
+    func answer(_ question: PaneQuestion, ok: Bool, text: String? = nil) {
+        question.answer(ok: ok, text: text)
+        paneQuestions.removeAll { $0.id == question.id }
+    }
+
+    /// A page closed, gone to another address, or out of Split View: what it
+    /// asked is answered as dismissed.
+    func dropQuestions(for tab: Tab.ID? = nil) {
+        let dropping = paneQuestions.filter { tab == nil || $0.tab == tab }
+        guard !dropping.isEmpty else { return }
+        paneQuestions.removeAll { question in dropping.contains { $0.id == question.id } }
+        for question in dropping { question.answer(ok: false) }
+    }
+
     // MARK: - alert, confirm, prompt
 
     /// A page's question goes over its own page only. One from a tab in the
@@ -62,6 +131,9 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping () -> Void
     ) {
+        if let tab = paneAsking(webView) {
+            return askInPane(tab, frame: frame, message: message, kind: .alert) { _, _ in completionHandler() }
+        }
         ask(from: webView, show: {
             let alert = Dialogs.alert(from: frame, saying: message)
             alert.addButton(withTitle: "OK")
@@ -75,6 +147,9 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping (Bool) -> Void
     ) {
+        if let tab = paneAsking(webView) {
+            return askInPane(tab, frame: frame, message: message, kind: .confirm) { ok, _ in completionHandler(ok) }
+        }
         ask(from: webView, show: {
             let alert = Dialogs.alert(from: frame, saying: message)
             alert.addButton(withTitle: "OK")
@@ -92,6 +167,11 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping (String?) -> Void
     ) {
+        if let tab = paneAsking(webView) {
+            return askInPane(tab, frame: frame, message: prompt, kind: .prompt(defaultText ?? "")) { ok, text in
+                completionHandler(ok ? (text ?? "") : nil)
+            }
+        }
         ask(from: webView, show: {
             let alert = Dialogs.alert(from: frame, saying: prompt)
             alert.addButton(withTitle: "OK")
@@ -266,6 +346,7 @@ extension Browser {
     /// one thing worth offering, is what the failure view is for.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard let tab = tab(for: webView) else { return }
+        dropQuestions(for: tab.id)
         // In front of you: straight back, a reload beats a white page with a
         // button on it. Behind another tab: the moment you come back to it.
         if tab.id == activeID, !tab.isBlank {
