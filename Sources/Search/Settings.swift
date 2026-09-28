@@ -556,9 +556,14 @@ struct SettingsPanel: View {
                     Switch(on: Binding(get: { !prefs.keepsSignIns }, set: { prefs.keepsSignIns = !$0 }))
                 }
                 Rule()
-                Line("Camera, microphone and location", "What each site was allowed or refused") {
+                Line("Camera, microphone, location and notifications", "What each site was allowed or refused") {
                     Pill("Forget choices") { browser.forgetCaptureChoices() }
                 }
+                Rule()
+                Line("Let sites ask to send notifications", "A site asks on a card over its page, and only one you allow reaches your Mac's notifications. Private tabs are never asked") {
+                    Switch(on: $prefs.siteNotifications)
+                }
+                NotificationSites()
             }
             Card {
                 Line("History", "Every address you have been to") {
@@ -876,5 +881,23 @@ struct Pill: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .animation(Motion.quick, value: hovering)
+    }
+}
+
+/// Settings › Privacy: the sites allowed to send notifications, each with a
+/// way to take it back.
+private struct NotificationSites: View {
+    @ObservedObject private var notifications = SiteNotifications.shared
+
+    var body: some View {
+        let sites = SiteNotifications.allowed
+        if !sites.isEmpty {
+            ForEach(sites, id: \.self) { site in
+                Rule()
+                Line(URL(string: site).map(SiteCard.site) ?? site, "Can send notifications") {
+                    Pill("Remove") { SiteNotifications.forget(site) }
+                }
+            }
+        }
     }
 }

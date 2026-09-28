@@ -1243,6 +1243,12 @@ final class Bench {
                 answer(["error": "ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT"])
             }
 
+        case "notifications":
+            // What a test run would have posted, and every site's answer.
+            guard Store.testing else { answer(["error": "notifications only works on a --test run"]); return }
+            answer(["recorded": SiteNotifications.shared.recorded, "choices": SiteNotifications.choices,
+                    "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? ""])
+
         case "answer":
             // The card of a page asking for the camera, microphone or your
             // location: once, always or no. Only on a SEARCH_PROBE run.
@@ -2190,7 +2196,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find", "answer", "visible", "ai",
+                "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "resize", "hit", "film", "float", "window", "pages", "picture", "place", "group", "tospace", "field", "bookmark", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "accounts", "find", "answer", "visible", "ai", "notifications",
             ]])
         }
     }

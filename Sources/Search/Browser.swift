@@ -1006,7 +1006,8 @@ final class Browser: NSObject, ObservableObject {
         where key.hasPrefix("capture.") {
             Store.settings.removeObject(forKey: key)
         }
-        announce("Camera, microphone and location choices forgotten")
+        SiteNotifications.shared.objectWillChange.send()
+        announce("Camera, microphone, location and notification choices forgotten")
     }
 
     /// What was last answered to a page asking where you are, in a test run
@@ -4165,8 +4166,33 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         asking = CaptureAsk(host: origin.host, wants: "location", once: true, keeps: !tab.shy)
     }
 
+    /// A page asking to send notifications. Asked over its own page, as the
+    /// camera is, and only for the page's own origin; kept per origin under
+    /// the same "capture." keys, so Forget choices takes it back. A private
+    /// tab, or Settings › Privacy's switch off, is refused without a card.
+    @objc(_webView:requestNotificationPermissionForSecurityOrigin:decisionHandler:)
+    func askedForNotifications(_ webView: WKWebView, origin: WKSecurityOrigin, decisionHandler: @escaping (Bool) -> Void) {
+        let site = Browser.origin(origin.protocol, origin.host, origin.port)
+        guard prefs.siteNotifications, let tab = tab(for: webView), !tab.shy, !origin.host.isEmpty,
+              let page = webView.url, let scheme = page.scheme, let host = page.host(),
+              Browser.origin(scheme, host, page.port ?? 0) == site
+        else { return decisionHandler(false) }
+        if let remembered = SiteNotifications.choices[site] { return decisionHandler(remembered) }
+        ask(from: webView, show: { [weak self] in
+            guard let self else { return decisionHandler(false) }
+            guard decide == nil else { return decisionHandler(false) }
+            decide = { decision in
+                if decision == .grant { SiteNotifications.shared.authorize() }
+                decisionHandler(decision == .grant)
+                SiteNotifications.shared.objectWillChange.send()
+            }
+            askedAbout = "\(site)|notifications"
+            asking = CaptureAsk(host: origin.host, wants: "notifications")
+        }, drop: { decisionHandler(false) })
+    }
+
     /// "scheme://host[:port]", the way an origin is kept for its answers.
-    private static func origin(_ scheme: String, _ host: String, _ port: Int) -> String {
+    static func origin(_ scheme: String, _ host: String, _ port: Int) -> String {
         let scheme = scheme.lowercased(), host = host.lowercased()
         let standard = (scheme == "https" && port == 443) || (scheme == "http" && port == 80)
         return "\(scheme)://\(host)" + (port == 0 || standard ? "" : ":\(port)")

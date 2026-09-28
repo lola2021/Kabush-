@@ -106,6 +106,11 @@ final class Preferences: ObservableObject {
     /// of links from another app — waits to load until it is gone to, as a
     /// tab brought back from the last session does (see Browser.open).
     /// Off unless asked for.
+    /// Settings › Privacy › Let sites ask to send notifications. On: a site
+    /// asks on a card, and only what you allow ever reaches the Mac.
+    @Published var siteNotifications: Bool {
+        didSet { store.set(siteNotifications, forKey: "notifications.ask") }
+    }
     @Published var lazyTabs: Bool {
         didSet { store.set(lazyTabs, forKey: "tabs.lazy") }
     }
@@ -365,6 +370,7 @@ final class Preferences: ObservableObject {
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         lazyTabs = store.bool(forKey: "tabs.lazy")
         startsFresh = store.bool(forKey: Preferences.freshKey)
+        siteNotifications = store.object(forKey: "notifications.ask") as? Bool ?? true
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")

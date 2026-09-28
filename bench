@@ -491,6 +491,8 @@ def main(argv):
     elif verb == "answer":
         if args not in (["once"], ["always"], ["no"]): sys.exit("usage: bench answer once|always|no")
         request["with"] = args[0]
+    elif verb == "notifications":
+        pass
     elif verb == "accounts":
         if len(args) not in (0, 1) or (args and not args[0].isdigit()): sys.exit("usage: bench accounts [ROW]")
         if args: request["pick"] = int(args[0])

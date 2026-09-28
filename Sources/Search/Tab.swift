@@ -85,6 +85,9 @@ enum Web {
         // cookies, its own sign-ins, and nothing left behind when it closes.
         // With spaces on, each space's tabs share a store of that space's.
         config.websiteDataStore = store ?? (shy ? .nonPersistent() : MainActor.assumeIsolated { Spaces.store(for: space ?? Spaces.current) })
+        // Web notifications go through the store (see Notifications.swift);
+        // a private tab's is left without, and a page there is refused.
+        if !shy { let kept = config.websiteDataStore; MainActor.assumeIsolated { SiteNotifications.shared.attach(kept) } }
         config.processPool = Web.pool
         // Chrome extensions see every page but a private one, unless Settings
         // › Extensions says they may. The controller has to be there when the
@@ -592,6 +595,7 @@ final class Tab: ObservableObject, Identifiable {
         Web.inspector(web.configuration.preferences)
         web.navigationDelegate = delegate
         web.uiDelegate = delegate
+        if !shy { PageNotifications.provide(web) }
 
         // Each name is cleared before being claimed — registering one twice is
         // a hard crash rather than an error. A tab opened by a link gets a
