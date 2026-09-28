@@ -1184,10 +1184,12 @@ struct ContentView: View {
         // Lock says. Not while typing in the peeked page — a comment box or
         // a mail there sends with the same keys — by the page's word or by
         // the caret being in something editable, in any frame.
+        // ⌥⌘Return, with Split View on, keeps it beside the page instead.
         if event.keyCode == 36 || event.keyCode == 76,
-           flags.intersection([.command, .shift, .option, .control]) == .command,
+           flags.intersection([.command, .shift, .option, .control]) == .command
+            || (browser.prefs.splitView && flags.intersection([.command, .shift, .option, .control]) == [.command, .option]),
            let peek = browser.peekTab, !peek.typing, peek.built?.inputContext == nil {
-            browser.keepPeek()
+            browser.keepPeek(beside: flags.contains(.option))
             return true
         }
 

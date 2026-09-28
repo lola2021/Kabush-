@@ -27,16 +27,23 @@ extension Browser {
         page.close()
     }
 
-    /// Kept: a tab beside the one it was opened from, and in front.
-    func keepPeek() {
+    /// Kept: a tab beside the one it was opened from, and in front. With
+    /// Split View on, `beside` keeps it in a pair with that page instead —
+    /// the page and what it linked to, side by side.
+    func keepPeek(beside: Bool = false) {
         guard let page = peekTab else { return }
+        let from = active
         let place = placeForNew()
         // Kept from a grouped tab, it joins that group, as a link opened
         // from there does (see open).
         if prefs.usesTabGroups, !page.shy, let from = active { page.groupID = from.groupID }
         withAnimation(Motion.quick) { peekTab = nil }
         insert(page, at: place)
-        select(page)
+        if beside, prefs.splitView, let from, canSplit(page, with: from) {
+            pair(page, with: from, onLeft: false)
+        } else {
+            select(page)
+        }
     }
 }
 
@@ -80,7 +87,14 @@ struct PeekPanel: View {
                         .shadow(color: .black.opacity(0.25), radius: 30, y: 10)
                     VStack(spacing: 8) {
                         Knob("xmark", help: "Close (esc)") { browser.closePeek() }
-                        Knob("arrow.up.left.and.arrow.down.right", help: "Open as a tab (⌘↩)") { browser.keepPeek() }
+                        // ⌥ on it keeps the page beside this one, with Split
+                        // View on, as the button under it does.
+                        Knob("arrow.up.left.and.arrow.down.right", help: "Open as a tab (⌘↩)") {
+                            browser.keepPeek(beside: NSEvent.modifierFlags.contains(.option))
+                        }
+                        if browser.prefs.splitView {
+                            Knob("rectangle.split.2x1", help: "Keep beside this page (⌥⌘↩)") { browser.keepPeek(beside: true) }
+                        }
                     }
                 }
                 .frame(width: geo.size.width * 0.82, height: geo.size.height * 0.86)

@@ -2167,7 +2167,9 @@ final class Bench {
             if let on = request["peek"] as? Bool { browser.peeking = on }
             // A peek at a link (Peek.swift): its two buttons.
             if let what = request["peeklink"] as? String {
-                if what == "keep" { browser.keepPeek() } else { browser.closePeek() }
+                if what == "keep" { browser.keepPeek() }
+                else if what == "beside" { browser.keepPeek(beside: true) }
+                else { browser.closePeek() }
             }
             // The address of the tab on screen being edited in the tab, with
             // this typed, and that edit let go of by a click elsewhere.

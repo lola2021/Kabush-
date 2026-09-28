@@ -418,9 +418,27 @@ def case_slice6(t):
 
 
 
+def case_peek(t):
+    """a peek kept beside"""
+    setup(splitView=True); launch()
+    a = page("docs"); sp("select", id=a); time.sleep(0.6)
+    cmd({"do": "peek", "url": f"{BASE}/reference"}); time.sleep(1)
+    cmd({"do": "ui", "peeklink": "beside"}); time.sleep(0.8)
+    st = sp("state")
+    kept = [x["id"] for x in st["tabs"] if x["url"].endswith("/reference")]
+    t.ok("a peek kept beside: in a pair with the page it came from", kept and st["splits"] and st["splits"][0]["tabs"] == [a, kept[0]], (st["splits"], kept))
+    t.ok("…and the kept page has the keys", kept and st["activeID"] == kept[0])
+    sp("enabled", on=False)
+    cmd({"do": "peek", "url": f"{BASE}/other"}); time.sleep(1)
+    cmd({"do": "ui", "peeklink": "beside"}); time.sleep(0.8)
+    st = sp("state")
+    other = [x["id"] for x in st["tabs"] if x["url"].endswith("/other")]
+    t.ok("Split View off: kept as a tab, as before", other and st["activeID"] == other[0] and len(st["splits"]) == 1, (st["splits"], other))
+
+
 def main():
     t = T()
-    for case in [case_slice1, case_slice1b, case_slice2, case_slice3, case_slice4, case_slice5a, case_slice5b, case_slice6]:
+    for case in [case_slice1, case_slice1b, case_slice2, case_slice3, case_slice4, case_slice5a, case_slice5b, case_slice6, case_peek]:
         print(f"— {case.__doc__}")
         try:
             case(t)
