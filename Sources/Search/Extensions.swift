@@ -941,6 +941,9 @@ final class Extensions: NSObject, ObservableObject {
         ("readingList", "Read and change your reading list"), ("downloads.open", "Open files it downloads"),
         ("desktopCapture", "Record your screen or a window, when you choose what to share"),
         ("tabCapture", "Record a tab, when you ask it to"),
+        ("webRequest", "See and change network requests"), ("webNavigation", "See page navigation"),
+        ("alarms", "Schedule code to run later"), ("contextMenus", "Add right-click menu items"),
+        ("commands", "Add keyboard shortcuts"),
     ]
 
     /// What an extension wants, in words.

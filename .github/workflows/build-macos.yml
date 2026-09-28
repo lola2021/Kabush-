@@ -1,0 +1,48 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ublock-mv2-support]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Show Xcode version
+        run: xcodebuild -version
+      
+      - name: Resolve dependencies
+        run: swift package resolve
+      
+      - name: Build Search.app using build.sh
+        run: |
+          ./build.sh debug app
+      
+      - name: Verify app bundle
+        run: |
+          APP_PATH="build/Search.app"
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          echo "Found: $APP_PATH"
+          ls -la "$APP_PATH"
+      
+      - name: Create unsigned DMG (for testing)
+        if: env.APP_PATH != ''
+        run: |
+          hdiutil create \
+            -volname "Search" \
+            -srcfolder "$APP_PATH" \
+            -ov -format UDZO \
+            Search-unsigned.dmg
+      
+      - name: Upload DMG artifact
+        if: env.APP_PATH != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Search-macOS
+          path: Search-unsigned.dmg
+          retention-days: 7

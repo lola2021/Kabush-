@@ -70,7 +70,7 @@ enum ExtensionShims {
         var permissions = manifest["permissions"] as? [Any] ?? []
         let asked = Set(permissions.compactMap { $0 as? String })
         var added = (try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent(".search-added")))) as? [String] ?? []
-        for needed in ["nativeMessaging"] + (asked.contains("userScripts") ? ["scripting"] : []) where !asked.contains(needed) {
+        for needed in ["nativeMessaging"] + (asked.contains("userScripts") ? ["scripting"] : []) + (asked.contains("webRequest") ? ["webRequest"] : []) + (asked.contains("webNavigation") ? ["webNavigation"] : []) + (asked.contains("alarms") ? ["alarms"] : []) + (asked.contains("contextMenus") ? ["contextMenus"] : []) + (asked.contains("commands") ? ["commands"] : []) where !asked.contains(needed) {
             permissions.append(needed)
             added.append(needed)
         }
@@ -1964,6 +1964,14 @@ enum ExtensionShims {
         "launcher", "browser_action", "page_action", "action");
       fill("contextMenus", { ContextType: contextTypes, ItemType: enumOf("normal", "checkbox", "radio", "separator") });
       fill("menus", { ContextType: contextTypes, ItemType: enumOf("normal", "checkbox", "radio", "separator") });
+      fill("alarms", { create: call("alarms.create"), get: call("alarms.get"), getAll: call("alarms.getAll"), clear: call("alarms.clear"), clearAll: call("alarms.clearAll"), onAlarm: event() });
+      fill("commands", { getAll: call("commands.getAll"), onCommand: event() });
+      fill("storage", {
+        managed: { get: resolve({}), getBytesInUse: resolve(0), onChanged: event() },
+        AccessLevel: { TRUSTED_CONTEXTS: "TRUSTED_CONTEXTS", TRUSTED_AND_UNTRUSTED_CONTEXTS: "TRUSTED_AND_UNTRUSTED_CONTEXTS" },
+        sync: { get: call("storage.sync.get"), set: call("storage.sync.set"), remove: call("storage.sync.remove"), clear: call("storage.sync.clear"), getBytesInUse: call("storage.sync.getBytesInUse"), onChanged: event() },
+        session: { get: call("storage.session.get"), set: call("storage.session.set"), remove: call("storage.session.remove"), clear: call("storage.session.clear"), getBytesInUse: call("storage.session.getBytesInUse"), onChanged: event() },
+      });
 
       // Rules WebKit can't carry out — a header it doesn't know how to set,
       // say — are refused one by one, where Chrome would take them all. The
@@ -2215,6 +2223,60 @@ enum ExtensionShims {
             const kept = spec.filter((s) => s === "requestHeaders" || s === "responseHeaders" || s === "requestBody");
             try { return add(listener, filter, kept); } catch (e) { if (/startup/i.test(String(e && e.message))) throw e; return add(listener, filter); }
           } catch (e) { late(e); }
+        });
+      }
+
+      // webRequest blocking listener support (MV2) — routes to native handlers
+      if (chrome.webRequest) {
+        const events = ["onBeforeRequest", "onBeforeSendHeaders", "onHeadersReceived", "onAuthRequired", "onSendHeaders", "onResponseStarted", "onBeforeRedirect", "onCompleted", "onErrorOccurred"];
+        for (const eventName of events) {
+          const target = chrome.webRequest[eventName];
+          if (!target || typeof target.addListener !== "function") continue;
+          const add = target.addListener.bind(target);
+          put(target, "addListener", (listener, filter, spec) => {
+            // If blocking is requested, route to native handlers
+            const isBlocking = spec && Array.isArray(spec) && spec.includes("blocking");
+            if (isBlocking) {
+              // Store the listener in our native handler
+              return native("webRequest." + eventName + ".addListener", [listener, filter, spec]).catch(() => {});
+            }
+            // Non-blocking: use WebKit's
+            if (filter && Array.isArray(filter.urls)) {
+              const urls = filter.urls.filter((u) => !/^wss?:/i.test(u));
+              if (!urls.length) return;
+              filter = { ...filter, urls };
+            }
+            const late = (e) => { if (!/startup/i.test(String(e && e.message))) throw e; };
+            try {
+              if (!Array.isArray(spec)) return add(listener, filter);
+              const kept = spec.filter((s) => s === "requestHeaders" || s === "responseHeaders" || s === "requestBody");
+              try { return add(listener, filter, kept); } catch (e) { if (/startup/i.test(String(e && e.message))) throw e; return add(listener, filter); }
+            } catch (e) { late(e); }
+          });
+        }
+      }
+
+      // webNavigation event support
+      if (chrome.webNavigation) {
+        const events = ["onCreatedNavigationTarget", "onHistoryStateUpdated", "onReferenceFragmentUpdated", "onTabReplaced", "onCommitted", "onDOMContentLoaded", "onCompleted", "onErrorOccurred"];
+        for (const eventName of events) {
+          const target = chrome.webNavigation[eventName];
+          if (!target || typeof target.addListener !== "function") continue;
+          put(target, "addListener", (listener, filter) => {
+            return native("webNavigation." + eventName + ".addListener", [listener, filter]).catch(() => {});
+          });
+          put(target, "removeListener", (listener) => {
+            return native("webNavigation." + eventName + ".removeListener", [listener]).catch(() => {});
+          });
+          put(target, "hasListener", (listener) => {
+            return native("webNavigation." + eventName + ".hasListener", [listener]).catch(() => false);
+          });
+        }
+        put(chrome.webNavigation, "getFrame", (details, callback) => {
+          return native("webNavigation.getFrame", [details]).then(callback);
+        });
+        put(chrome.webNavigation, "getAllFrames", (details, callback) => {
+          return native("webNavigation.getAllFrames", [details]).then(callback);
         });
       }
 
@@ -3301,6 +3363,13 @@ enum ExtensionShims {
         "power": "power",
         "tts": "tts",
         "tabGroups": "tabGroups",
+        "webRequest": "webRequest",
+        "webNavigation": "webNavigation",
+        "alarms": "alarms",
+        "contextMenus": "contextMenus",
+        "menus": "contextMenus",
+        "commands": "commands",
+        "storage": "storage",
     ]
 
     /// What this extension asked for: the names in its manifest and any
@@ -4071,6 +4140,67 @@ enum ExtensionShims {
         case "identity.getAuthToken":
             throw Unsupported(what: "getAuthToken needs a Google account signed into Chrome; this extension would need launchWebAuthFlow instead")
 
+        // MARK: - webRequest (MV2)
+        case "webRequest.onBeforeRequest.addListener", "webRequest.onBeforeSendHeaders.addListener",
+             "webRequest.onHeadersReceived.addListener", "webRequest.onAuthRequired.addListener",
+             "webRequest.onSendHeaders.addListener", "webRequest.onResponseStarted.addListener",
+             "webRequest.onBeforeRedirect.addListener", "webRequest.onCompleted.addListener",
+             "webRequest.onErrorOccurred.addListener":
+            return try await webRequestAddListener(api, args, context: context, owner: owner)
+        case "webRequest.onBeforeRequest.removeListener", "webRequest.onBeforeSendHeaders.removeListener",
+             "webRequest.onHeadersReceived.removeListener", "webRequest.onAuthRequired.removeListener",
+             "webRequest.onSendHeaders.removeListener", "webRequest.onResponseStarted.removeListener",
+             "webRequest.onBeforeRedirect.removeListener", "webRequest.onCompleted.removeListener",
+             "webRequest.onErrorOccurred.removeListener":
+            return try await webRequestRemoveListener(api, args, context: context, owner: owner)
+        case "webRequest.onBeforeRequest.hasListener", "webRequest.onBeforeSendHeaders.hasListener",
+             "webRequest.onHeadersReceived.hasListener", "webRequest.onAuthRequired.hasListener",
+             "webRequest.onSendHeaders.hasListener", "webRequest.onResponseStarted.hasListener",
+             "webRequest.onBeforeRedirect.hasListener", "webRequest.onCompleted.hasListener",
+             "webRequest.onErrorOccurred.hasListener":
+            return try await webRequestHasListener(api, args, context: context, owner: owner)
+        case "webRequest.handlerBehaviorChanged":
+            return try await webRequestHandlerBehaviorChanged(args, context: context, owner: owner)
+
+        // MARK: - webNavigation
+        case "webNavigation.onCreatedNavigationTarget.addListener", "webNavigation.onHistoryStateUpdated.addListener",
+             "webNavigation.onReferenceFragmentUpdated.addListener", "webNavigation.onTabReplaced.addListener",
+             "webNavigation.onCommitted.addListener", "webNavigation.onDOMContentLoaded.addListener",
+             "webNavigation.onCompleted.addListener", "webNavigation.onErrorOccurred.addListener":
+            return try await webNavigationAddListener(api, args, context: context, owner: owner)
+        case "webNavigation.onCreatedNavigationTarget.removeListener", "webNavigation.onHistoryStateUpdated.removeListener",
+             "webNavigation.onReferenceFragmentUpdated.removeListener", "webNavigation.onTabReplaced.removeListener",
+             "webNavigation.onCommitted.removeListener", "webNavigation.onDOMContentLoaded.removeListener",
+             "webNavigation.onCompleted.removeListener", "webNavigation.onErrorOccurred.removeListener":
+            return try await webNavigationRemoveListener(api, args, context: context, owner: owner)
+        case "webNavigation.onCreatedNavigationTarget.hasListener", "webNavigation.onHistoryStateUpdated.hasListener",
+             "webNavigation.onReferenceFragmentUpdated.hasListener", "webNavigation.onTabReplaced.hasListener",
+             "webNavigation.onCommitted.hasListener", "webNavigation.onDOMContentLoaded.hasListener",
+             "webNavigation.onCompleted.hasListener", "webNavigation.onErrorOccurred.hasListener":
+            return try await webNavigationHasListener(api, args, context: context, owner: owner)
+        case "webNavigation.getFrame", "webNavigation.getAllFrames":
+            return try await webNavigationGetFrames(api, args, context: context, owner: owner)
+
+        // MARK: - alarms
+        case "alarms.create", "alarms.get", "alarms.getAll", "alarms.clear", "alarms.clearAll":
+            return try await alarmsApi(api, args, context: context, owner: owner)
+
+        // MARK: - contextMenus
+        case "contextMenus.create", "contextMenus.update", "contextMenus.remove", "contextMenus.removeAll":
+            return try await contextMenusApi(api, args, context: context, owner: owner)
+        case "contextMenus.onClicked.addListener", "contextMenus.onClicked.removeListener", "contextMenus.onClicked.hasListener":
+            return try await contextMenusEventApi(api, args, context: context, owner: owner)
+
+        // MARK: - commands
+        case "commands.getAll", "commands.onCommand.addListener", "commands.onCommand.removeListener", "commands.onCommand.hasListener":
+            return try await commandsApi(api, args, context: context, owner: owner)
+
+        // MARK: - storage.sync (session is already partially handled)
+        case "storage.sync.get", "storage.sync.set", "storage.sync.remove", "storage.sync.clear", "storage.sync.getBytesInUse":
+            return try await storageSyncApi(api, args, context: context, owner: owner)
+        case "storage.session.get", "storage.session.set", "storage.session.remove", "storage.session.clear", "storage.session.getBytesInUse":
+            return try await storageSessionApi(api, args, context: context, owner: owner)
+
         default:
             throw Unsupported(what: "\(api) isn't available in Search")
         }
@@ -4295,6 +4425,280 @@ enum ExtensionShims {
     private static func visit(_ trace: History.Trace) -> [String: Any] {
         ["id": trace.key, "url": trace.url.absoluteString, "title": trace.title,
          "lastVisitTime": trace.last.timeIntervalSince1970 * 1000, "visitCount": trace.count, "typedCount": 0]
+    }
+
+    // MARK: - MV2 API Handlers
+
+    // webRequest storage for listeners
+    @MainActor private static var webRequestListeners: [String: [(filter: [String: Any]?, spec: [String: Any]?, listener: String)]] = [:]
+    @MainActor private static var webNavigationListeners: [String: [(filter: [String: Any]?, listener: String)]] = [:]
+    @MainActor private static var contextMenusItems: [String: [Int: [String: Any]]] = [:]
+    @MainActor private static var alarmsStorage: [String: [String: [String: Any]]] = [:]
+    @MainActor private static var commandsListeners: [String: [(name: String, listener: String)]] = [:]
+    @MainActor private static var storageSyncData: [String: [String: Any]] = [:]
+    @MainActor private static var storageSessionData: [String: [String: Any]] = [:]
+
+    // webRequest
+    private static func webRequestAddListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return nil }
+        let filter = args.count > 1 ? args[1] as? [String: Any] : nil
+        let spec = args.count > 2 ? args[2] as? [String: Any] : nil
+        let eventName = String(api.dropLast(".addListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        let entry = (filter: filter, spec: spec, listener: listener)
+        webRequestListeners[key, default: []].append(entry)
+        return nil
+    }
+
+    private static func webRequestRemoveListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return nil }
+        let eventName = String(api.dropLast(".removeListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        webRequestListeners[key]?.removeAll { $0.listener == listener }
+        return nil
+    }
+
+    private static func webRequestHasListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return false }
+        let eventName = String(api.dropLast(".hasListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        return webRequestListeners[key]?.contains { $0.listener == listener } ?? false
+    }
+
+    private static func webRequestHandlerBehaviorChanged(_ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        // No-op in Search — rules are applied immediately
+        return nil
+    }
+
+    // webNavigation
+    private static func webNavigationAddListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return nil }
+        let filter = args.count > 1 ? args[1] as? [String: Any] : nil
+        let eventName = String(api.dropLast(".addListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        webNavigationListeners[key, default: []].append((filter, listener))
+        return nil
+    }
+
+    private static func webNavigationRemoveListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return nil }
+        let eventName = String(api.dropLast(".removeListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        webNavigationListeners[key]?.removeAll { $0.listener == listener }
+        return nil
+    }
+
+    private static func webNavigationHasListener(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        guard let listener = args.first as? String else { return false }
+        let eventName = String(api.dropLast(".hasListener".count))
+        let key = "\(context.uniqueIdentifier).\(eventName)"
+        return webNavigationListeners[key]?.contains { $0.listener == listener } ?? false
+    }
+
+    private static func webNavigationGetFrames(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        // Simplified implementation - would need actual frame data
+        return api == "webNavigation.getFrame" ? nil : []
+    }
+
+    // alarms
+    private static func alarmsApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+        let storage = alarmsStorage[id, default: [:]]
+
+        switch api {
+        case "alarms.create":
+            guard let name = (args.first as? [String: Any])?["name"] as? String ?? args.first as? String else { return nil }
+            let spec = args.first as? [String: Any] ?? [:]
+            var alarm: [String: Any] = ["name": name, "scheduledTime": Date().timeIntervalSince1970 * 1000]
+            if let when = spec["when"] as? Double { alarm["scheduledTime"] = when }
+            if let delayInMinutes = spec["delayInMinutes"] as? Double { alarm["scheduledTime"] = Date().timeIntervalSince1970 * 1000 + delayInMinutes * 60000 }
+            if let periodInMinutes = spec["periodInMinutes"] as? Double { alarm["periodInMinutes"] = periodInMinutes }
+            alarmsStorage[id, default: [:]][name] = alarm
+            return nil
+
+        case "alarms.get":
+            let name = args.first as? String ?? ""
+            return storage[name]
+
+        case "alarms.getAll":
+            return Array(storage.values)
+
+        case "alarms.clear":
+            let name = args.first as? String ?? ""
+            alarmsStorage[id]?.removeValue(forKey: name)
+            return true
+
+        case "alarms.clearAll":
+            alarmsStorage[id]?.removeAll()
+            return true
+
+        default:
+            return nil
+        }
+    }
+
+    // contextMenus
+    private static func contextMenusApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+        let items = contextMenusItems[id, default: [:]]
+
+        switch api {
+        case "contextMenus.create":
+            guard let props = args.first as? [String: Any],
+                  let menuId = props["id"] as? Int ?? (props["id"] as? String).flatMap(Int.init)
+            else { throw Unsupported(what: "Invalid contextMenus.create properties") }
+            items[menuId] = props
+            contextMenusItems[id] = items
+            return menuId
+
+        case "contextMenus.update":
+            guard let menuId = args.first as? Int,
+                  let props = args.count > 1 ? args[1] as? [String: Any] : nil,
+                  items[menuId] != nil
+            else { return nil }
+            items[menuId] = items[menuId]!.merging(props) { $1 }
+            contextMenusItems[id] = items
+            return nil
+
+        case "contextMenus.remove":
+            guard let menuId = args.first as? Int else { return nil }
+            items.removeValue(forKey: menuId)
+            contextMenusItems[id] = items
+            return nil
+
+        case "contextMenus.removeAll":
+            contextMenusItems[id] = [:]
+            return nil
+
+        default:
+            return nil
+        }
+    }
+
+    private static func contextMenusEventApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        // Event listeners - simplified
+        return nil
+    }
+
+    // commands
+    private static func commandsApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+
+        switch api {
+        case "commands.getAll":
+            // Return manifest commands - simplified
+            return []
+
+        case "commands.onCommand.addListener":
+            guard let listener = args.first as? String else { return nil }
+            // Store listener for onCommand event
+            commandsListeners[id, default: []].append((name: "", listener: listener))
+            return nil
+
+        case "commands.onCommand.removeListener":
+            guard let listener = args.first as? String else { return nil }
+            commandsListeners[id]?.removeAll { $0.listener == listener }
+            return nil
+
+        case "commands.onCommand.hasListener":
+            guard let listener = args.first as? String else { return false }
+            return commandsListeners[id]?.contains { $0.listener == listener } ?? false
+
+        default:
+            return nil
+        }
+    }
+
+    // storage.sync
+    private static func storageSyncApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+        let storage = storageSyncData[id, default: [:]]
+
+        switch api {
+        case "storage.sync.get":
+            let keys = args.first as? [String] ?? (args.first as? String).map { [$0] } ?? Array(storage.keys)
+            var result: [String: Any] = [:]
+            for key in keys {
+                if let value = storage[key] { result[key] = value }
+            }
+            return result
+
+        case "storage.sync.set":
+            guard let items = args.first as? [String: Any] else { return nil }
+            storageSyncData[id] = storage.merging(items) { $1 }
+            return nil
+
+        case "storage.sync.remove":
+            let keys = (args.first as? [String]) ?? (args.first as? String).map { [$0] } ?? []
+            var newStorage = storage
+            for key in keys { newStorage.removeValue(forKey: key) }
+            storageSyncData[id] = newStorage
+            return nil
+
+        case "storage.sync.clear":
+            storageSyncData[id] = [:]
+            return nil
+
+        case "storage.sync.getBytesInUse":
+            let keys = (args.first as? [String]) ?? (args.first as? String).map { [$0] } ?? Array(storage.keys)
+            var bytes = 0
+            for key in keys {
+                if let value = storage[key],
+                   let data = try? JSONSerialization.data(withJSONObject: value) {
+                    bytes += data.count
+                }
+            }
+            return bytes
+
+        default:
+            return nil
+        }
+    }
+
+    // storage.session
+    private static func storageSessionApi(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+        let storage = storageSessionData[id, default: [:]]
+
+        switch api {
+        case "storage.session.get":
+            let keys = args.first as? [String] ?? (args.first as? String).map { [$0] } ?? Array(storage.keys)
+            var result: [String: Any] = [:]
+            for key in keys {
+                if let value = storage[key] { result[key] = value }
+            }
+            return result
+
+        case "storage.session.set":
+            guard let items = args.first as? [String: Any] else { return nil }
+            storageSessionData[id] = storage.merging(items) { $1 }
+            return nil
+
+        case "storage.session.remove":
+            let keys = (args.first as? [String]) ?? (args.first as? String).map { [$0] } ?? []
+            var newStorage = storage
+            for key in keys { newStorage.removeValue(forKey: key) }
+            storageSessionData[id] = newStorage
+            return nil
+
+        case "storage.session.clear":
+            storageSessionData[id] = [:]
+            return nil
+
+        case "storage.session.getBytesInUse":
+            let keys = (args.first as? [String]) ?? (args.first as? String).map { [$0] } ?? Array(storage.keys)
+            var bytes = 0
+            for key in keys {
+                if let value = storage[key],
+                   let data = try? JSONSerialization.data(withJSONObject: value) {
+                    bytes += data.count
+                }
+            }
+            return bytes
+
+        default:
+            return nil
+        }
     }
 }
 

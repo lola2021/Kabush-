@@ -65,7 +65,7 @@ MINIMUM="14.0"
 # -Osize for a release: 14% less binary (5.39 → 4.65 MB) at the same speed —
 # launch 337 against 338 ms, a scroll frame 0.26 against 0.25 ms, a key typed
 # 0.41 ms either way, measured interleaved on 1.0.4 (27 Sep 2026).
-SWIFTFLAGS=(-c "$CONFIG" --arch "$ARCH")
+SWIFTFLAGS=(-c "$CONFIG" --arch "$ARCH" -Xswiftc -swift-version -Xswiftc 5)
 [ "$CONFIG" = "release" ] && SWIFTFLAGS+=(-Xswiftc -Osize)
 swift build "${SWIFTFLAGS[@]}"
 BINARY="$(swift build "${SWIFTFLAGS[@]}" --show-bin-path)/Search"
