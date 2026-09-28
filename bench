@@ -37,6 +37,8 @@
     ./bench ext-shot ID PATH           a picture of its popup while it is open
     ./bench ext-answer yes|no|ask      test run: answer extensions' questions without asking; lists what was asked
     ./bench ext-enable ID on|off       switch an extension on or off
+    ./bench capture                    extensions' screen recording: ids given, what records, who may, last request
+    ./bench capture-stop ID            stop what an extension is recording, as the pill's Stop does
     ./bench ext-remove ID
     ./bench strip PATH [WIDTH]         the row of tabs across the top, drawn off screen to a PNG
     ./bench column PATH [HEIGHT]       the column of tabs, drawn off screen to a PNG
@@ -219,6 +221,11 @@ def main(argv):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
         request["yes"] = yes
+    elif verb == "capture":
+        pass
+    elif verb == "capture-stop":
+        if len(args) != 1: sys.exit("usage: bench capture-stop ID")
+        request["id"] = args[0]
     elif verb == "ext-enable":
         if len(args) != 2: sys.exit("usage: bench ext-enable ID on|off")
         request["id"] = args[0]

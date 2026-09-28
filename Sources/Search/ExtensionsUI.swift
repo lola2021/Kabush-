@@ -96,6 +96,8 @@ struct ExtensionsPage: View {
                     }
                 }
 
+                Recorders()
+
                 Card {
                     Line("Load an unpacked extension", "A folder with a manifest.json — your own, or one exported from another browser. Reload picks up what you've changed in it since.") {
                         Pill("Choose…") { extensions.installFolder() }
@@ -108,6 +110,28 @@ struct ExtensionsPage: View {
             guard Crx.id(in: link) != nil else { return }
             extensions.install(from: link)
             link = ""
+        }
+    }
+
+    /// The extensions you let record your screen, each one to take back.
+    @available(macOS 15.4, *)
+    private struct Recorders: View {
+        @ObservedObject private var capture = ExtensionCapture.shared
+
+        var body: some View {
+            let ids = ExtensionCapture.allowedIDs
+            if !ids.isEmpty {
+                Card {
+                    VStack(spacing: 0) {
+                        ForEach(Array(ids.enumerated()), id: \.element) { index, id in
+                            if index > 0 { Rule() }
+                            Line(Browser.extensionName(id), "Can record your screen — macOS asks what to share each time") {
+                                Pill("Remove") { ExtensionCapture.forget(id) }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

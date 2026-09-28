@@ -142,6 +142,10 @@ final class Extensions: NSObject, ObservableObject {
         // to a crawl and messages between an extension's popup and its
         // worker stop arriving. Not what anyone is testing.
         if Store.testing, !Store.measuring { views.preferences.inactiveSchedulingPolicy = .none }
+        // Screen recording: an extension's pages ask Search through this,
+        // which knows which page is asking (see ExtensionCapture).
+        views.userContentController.addScriptMessageHandler(ExtensionCapture.shared, contentWorld: .page, name: ExtensionCapture.channel)
+        ExtensionCapture.mockDevices(views.preferences)
         configuration.webViewConfiguration = views
         controller = WKWebExtensionController(configuration: configuration)
         super.init()
@@ -464,6 +468,7 @@ final class Extensions: NSObject, ObservableObject {
         // What it kept going outside WebKit goes with it: its offscreen
         // page, and a Mac kept awake on its behalf.
         ExtensionOffscreen.close(for: id)
+        ExtensionCapture.shared.purge(id)
         if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
@@ -711,6 +716,7 @@ final class Extensions: NSObject, ObservableObject {
 
     func remove(_ id: String) {
         unload(id)
+        ExtensionCapture.forget(id)
         errors[id] = nil
         Extensions.setSettings([:], for: id)
         Store.settings.removeObject(forKey: "extensions.granted.\(id)")
@@ -777,6 +783,7 @@ final class Extensions: NSObject, ObservableObject {
             Task { await load(installed[index]) }
         } else {
             unload(id)
+            ExtensionCapture.forget(id)
         }
     }
 
@@ -931,6 +938,8 @@ final class Extensions: NSObject, ObservableObject {
         ("management", "See your other extensions"), ("notifications", "Show notifications"),
         ("sessions", "See your recently closed tabs"), ("topSites", "See your most visited sites"),
         ("readingList", "Read and change your reading list"), ("downloads.open", "Open files it downloads"),
+        ("desktopCapture", "Record your screen or a window, when you choose what to share"),
+        ("tabCapture", "Record a tab, when you ask it to"),
     ]
 
     /// What an extension wants, in words.
@@ -976,6 +985,16 @@ final class Extensions: NSObject, ObservableObject {
     /// permissions Search answers itself.
     func ask(more names: String, context: WKWebExtensionContext) async -> Bool {
         await ask("asks for more access", detail: names, context: context)
+    }
+
+    /// Recording the screen: asked once, naming the extension; the Mac's own
+    /// picker still asks what to share, every time.
+    func ask(capture context: WKWebExtensionContext) async -> Bool {
+        let name = context.webExtension.displayName ?? "An extension"
+        return await ask(
+            "“\(name)” wants to record your screen or a window.",
+            detail: "macOS will ask what to share. Search remembers your answer for \(name); Settings › Extensions takes it back.",
+            icon: context.webExtension.icon(for: CGSize(width: 64, height: 64)), yes: "Continue", no: "Don't Allow")
     }
 
     func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
@@ -1066,6 +1085,12 @@ final class Extensions: NSObject, ObservableObject {
     /// its popup, or a page of its in a tab. Real events only: a page's
     /// script can dispatch one, but it never reaches here.
     static var touched: [String: Date] = [:]
+    /// Your last click or key anywhere in Search.
+    static var lastInput: Date?
+
+    static func recentlyUsed(within seconds: TimeInterval) -> Bool {
+        lastInput.map { Date().timeIntervalSince($0) < seconds } ?? false
+    }
     private static var touching: Any?
 
     static func watchTouches() {
@@ -1075,6 +1100,7 @@ final class Extensions: NSObject, ObservableObject {
                 ? event.window?.firstResponder as? NSView
                 : event.window?.contentView?.superview?.hitTest(event.locationInWindow)
             while let found = view, !(found is WKWebView) { view = found.superview }
+            Extensions.lastInput = Date()
             if let url = (view as? WKWebView)?.url, url.scheme?.lowercased() == Extensions.scheme, let id = url.host() {
                 Extensions.touched[id] = Date()
             }

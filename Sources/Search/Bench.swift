@@ -2277,7 +2277,7 @@ final class Bench {
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }
             answer(["ok": true])
 
-        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable":
+        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
             guard #available(macOS 15.4, *) else {
                 answer(["error": "extensions need macOS 15.4"])
                 return
@@ -2695,6 +2695,14 @@ final class Bench {
             guard let id = request["id"] as? String else { answer(["error": "ext-enable needs an id"]); return }
             extensions.setEnabled(id, request["on"] as? Bool ?? true)
             answer(["enabled": request["on"] as? Bool ?? true])
+        case "capture":
+            // Extensions' screen recording: ids given, what is recording, who
+            // may, and the last request with its answer.
+            answer(ExtensionCapture.shared.state)
+        case "capture-stop":
+            guard let id = request["id"] as? String else { answer(["error": "capture-stop needs an id"]); return }
+            ExtensionCapture.shared.stop(id)
+            answer(["stopping": id])
         case "ext-answer":
             // In a test run: answer every extension's question yes or no
             // without asking, or go back to asking.

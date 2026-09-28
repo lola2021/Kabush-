@@ -1458,11 +1458,162 @@ enum ExtensionShims {
       put2("proxy", { settings: setting("proxy.settings"), onProxyError: event() });
       put2("omnibox", { setDefaultSuggestion: () => {}, onInputStarted: event(), onInputChanged: event(),
         onInputEntered: event(), onInputCancelled: event(), onDeleteSuggestion: event() });
-      put2("tabCapture", { capture: refuse("tabCapture.capture"), getMediaStreamId: refuse("tabCapture.getMediaStreamId"),
-        getCapturedTabs: (cb) => { if (cb) cb([]); else return Promise.resolve([]); }, onStatusChanged: event() });
-      // The picker Chrome would show, cancelled: an empty stream id.
-      put2("desktopCapture", { chooseDesktopMedia: (sources, tab, cb) => { const f = typeof tab === "function" ? tab : cb; if (f) setTimeout(() => f("", {})); return 1; },
-        cancelChooseDesktopMedia: () => {}, DesktopCaptureSourceType: { SCREEN: "screen", WINDOW: "window", TAB: "tab", AUDIO: "audio" } });
+      // Screen recording (see ExtensionCapture.swift). Chrome's picker is
+      // Search's question, then the Mac's own; the stream id it hands back is
+      // an id Search gives once, which getUserMedia in the extension's page
+      // turns into the stream. Defined only for an extension that asks for
+      // it, as in Chrome: Awesome Screenshot records with getDisplayMedia
+      // when there is no desktopCapture.
+      const declares = (name) => [...(manifest.permissions || []), ...(manifest.optional_permissions || [])].includes(name);
+      const recorder = !inContent && !worker && typeof navigator !== "undefined" && !!navigator.mediaDevices
+        && typeof root.MediaDevices === "function";
+      // Only an extension's own page, at the top: Search checks that too.
+      const captureChannel = (() => {
+        try { return recorder && !embedded && window.top === window ? root.webkit.messageHandlers.searchCapture : null; } catch (e) { return null; }
+      })();
+      const askCapture = (op, body) => captureChannel
+        ? Promise.resolve(captureChannel.postMessage(Object.assign({ op }, body)))
+        : Promise.resolve({ error: "NotAllowedError", message: "Recording isn't available here" });
+      const refused = (reply) => new DOMException(String(reply && reply.message || "Permission denied"), String(reply && reply.error || "NotAllowedError"));
+      // What WebKit's getDisplayMedia takes: no min, no exact.
+      const displayVideo = (v) => {
+        if (!v || typeof v !== "object") return true;
+        const out = {};
+        for (const k of ["width", "height", "frameRate"]) {
+          const x = v[k] ?? (v.mandatory && v.mandatory["max" + k[0].toUpperCase() + k.slice(1)]);
+          if (typeof x === "number") out[k] = { max: x };
+          else if (x && typeof x === "object") {
+            const y = {};
+            if (x.max !== undefined) y.max = x.max;
+            if (x.ideal !== undefined) y.ideal = x.ideal;
+            if (Object.keys(y).length) out[k] = y;
+          }
+        }
+        return Object.keys(out).length ? out : true;
+      };
+      if (recorder) {
+        const P = root.MediaDevices.prototype;
+        const realGUM = P.getUserMedia, realGDM = P.getDisplayMedia;
+        const held = new Map();
+        const watch = () => { if (captureChannel) askCapture("watch", {}).catch(() => {}); };
+        // Called by Search alone (ExtensionCapture.record). WebKit counts an
+        // app's call as a click, and only until its first await, so the
+        // page's own getDisplayMedia — kept before any of the extension's
+        // code ran — is called at once.
+        if (typeof realGDM === "function") {
+          Object.defineProperty(root, Symbol.for("search.capture"), { value: (token, video) => {
+            let started;
+            try { started = realGDM.call(navigator.mediaDevices, { video: video == null ? true : video, audio: false }); }
+            catch (e) { return Promise.resolve({ error: e.name, message: String(e.message) }); }
+            return started.then((stream) => {
+              held.set(token, stream);
+              // An id never taken is stopped, not left recording.
+              setTimeout(() => {
+                if (held.get(token) !== stream) return;
+                held.delete(token);
+                stream.getTracks().forEach((t) => t.stop());
+              }, 60000);
+              return { ok: true };
+            }, (e) => ({ error: e.name, message: String(e.message) }));
+          } });
+        }
+        // Chrome's desktop and tab constraints, which WebKit would read as a
+        // plain camera request.
+        const desktopId = (c) => {
+          if (!c || typeof c !== "object") return null;
+          const m = c.mandatory || c;
+          return /^(desktop|screen|window|tab)$/.test(String(m.chromeMediaSource || "")) ? String(m.chromeMediaSourceId || "") : null;
+        };
+        // Chrome's older constraints (mandatory, optional, goog…) in the
+        // standard form.
+        const standard = (t) => {
+          if (!t || typeof t !== "object" || !(t.mandatory || t.optional)) return t;
+          const out = {};
+          for (const [k, v] of Object.entries(t)) if (k !== "mandatory" && k !== "optional") out[k] = v;
+          const set = (name, part, v) => { const x = out[name] && typeof out[name] === "object" ? out[name] : {}; x[part] = v; out[name] = x; };
+          const read = (k, v, strong) => {
+            const m = /^(min|max)(Width|Height|FrameRate|AspectRatio)$/.exec(k);
+            if (m) return set(m[2][0].toLowerCase() + m[2].slice(1), m[1], v);
+            if (k === "sourceId" || k === "deviceId") return set("deviceId", strong ? "exact" : "ideal", v);
+            const goog = { googEchoCancellation: "echoCancellation", googAutoGainControl: "autoGainControl", googNoiseSuppression: "noiseSuppression" }[k];
+            if (goog) out[goog] = v;
+          };
+          for (const [k, v] of Object.entries(t.mandatory || {})) read(k, v, true);
+          for (const o of t.optional || []) for (const [k, v] of Object.entries(o || {})) read(k, v, false);
+          return Object.keys(out).length ? out : true;
+        };
+        const take = async (id, c) => {
+          let stream = held.get(id);
+          if (!stream && id) {
+            const reply = await askCapture("consume", { token: id, video: displayVideo(c.video) });
+            if (!reply || !reply.ok) throw refused(reply);
+            stream = held.get(id);
+          }
+          held.delete(id);
+          if (!stream) throw refused();
+          // The sound of a screen or a tab alone: WebKit records none.
+          if (desktopId(c.video) === null) {
+            stream.getTracks().forEach((t) => t.stop());
+            throw new DOMException("Search can't record the sound of a screen or a tab", "NotFoundError");
+          }
+          const [track] = stream.getVideoTracks();
+          const want = displayVideo(c.video);
+          if (track && want !== true) try { await track.applyConstraints(want); } catch (e) {}
+          return stream;
+        };
+        put(P, "getUserMedia", function (c) {
+          const asked = c || {};
+          const id = desktopId(asked.video) ?? desktopId(asked.audio);
+          if (id !== null) return take(id, asked);
+          return realGUM.call(this, { audio: standard(asked.audio), video: standard(asked.video) })
+            .then((stream) => { watch(); return stream; });
+        });
+        if (typeof realGDM === "function") {
+          put(P, "getDisplayMedia", function (c) {
+            const asked = c || {};
+            return askCapture("display", { video: displayVideo(asked.video) }).then((reply) => {
+              const stream = reply && reply.ok && held.get(reply.token);
+              if (!stream) throw refused(reply);
+              held.delete(reply.token);
+              return stream;
+            });
+          });
+        }
+        // Chrome's older callback form, which Loom still records with.
+        const legacy = function (c, ok, fail) {
+          navigator.mediaDevices.getUserMedia(c).then(ok, (e) => { if (typeof fail === "function") fail(e); });
+        };
+        for (const name of ["getUserMedia", "webkitGetUserMedia"]) {
+          if (typeof navigator[name] !== "function") put(root.Navigator.prototype, name, legacy);
+        }
+      }
+      if (declares("desktopCapture")) {
+        let asks = 0;
+        const cancelled = new Set();
+        put2("desktopCapture", {
+          chooseDesktopMedia: (sources, tab, cb) => {
+            const f = typeof tab === "function" ? tab : cb;
+            const id = ++asks;
+            const done = (token) => { if (!cancelled.has(id) && typeof f === "function") f(token || "", { canRequestAudioTrack: false }); };
+            // From a page: asked and recorded there at once, so a cancelled
+            // picker is an empty id, as in Chrome. From the worker, which has
+            // nothing to record in: an id for one of its pages to use.
+            const asked = worker || background || !captureChannel
+              ? native("capture.grant", [sources || []])
+              : askCapture("choose", { sources: sources || [] }).then((r) => (r && r.ok ? r.token : ""));
+            Promise.resolve(asked).then(done, () => done(""));
+            return id;
+          },
+          cancelChooseDesktopMedia: (id) => { cancelled.add(id); },
+          DesktopCaptureSourceType: { SCREEN: "screen", WINDOW: "window", TAB: "tab", AUDIO: "audio" },
+        });
+      }
+      // A tab alone can't be recorded in Search: an extension that falls back
+      // to the screen, as Loom does, records the window instead.
+      if (declares("tabCapture")) {
+        put2("tabCapture", { capture: refuse("tabCapture.capture"), getMediaStreamId: refuse("tabCapture.getMediaStreamId"),
+          getCapturedTabs: (cb) => { if (cb) cb([]); else return Promise.resolve([]); }, onStatusChanged: event() });
+      }
       put2("pageCapture", { saveAsMHTML: refuse("pageCapture.saveAsMHTML") });
       put2("debugger", { attach: refuse("debugger.attach"), detach: refuse("debugger.detach"),
         sendCommand: refuse("debugger.sendCommand"), getTargets: (cb) => { if (cb) cb([]); else return Promise.resolve([]); },
@@ -3379,6 +3530,10 @@ enum ExtensionShims {
             return nil
 
         // MARK: offscreen — a page with a DOM for a worker that has none
+        // MARK: capture — a stream id for the worker's chooseDesktopMedia
+        case "capture.grant":
+            return await ExtensionCapture.shared.grant(for: context)
+
         case "offscreen.createDocument":
             guard let path = (first as? [String: Any])?["url"] as? String
             else { throw Unsupported(what: "No page for the offscreen document") }
