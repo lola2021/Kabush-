@@ -55,6 +55,8 @@ final class TabDrag: ObservableObject {
         let browserID: ObjectIdentifier
         let targetID: Tab.ID
         let side: Side
+        /// The tab being carried, to name it in the half it would take.
+        var sourceID: Tab.ID? = nil
     }
 
     enum Drop {
@@ -135,7 +137,7 @@ final class TabDrag: ObservableObject {
             if preview != nil { preview = nil }
             return false
         }
-        let wanted = Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right)
+        let wanted = Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right, sourceID: sourceTab.id)
         if preview == wanted { return true }
         guard settled(at: point) else {
             // Look again once it may have stopped: a hand at rest sends
@@ -173,7 +175,7 @@ final class TabDrag: ObservableObject {
             result = match(browser: browser, source: source, at: point)
             // A split only where one was shown.
             if case .stage(let page, let onLeft) = result,
-               preview != Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right) {
+               preview != Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right, sourceID: sourceTab?.id) {
                 result = .outside
             }
         } else {

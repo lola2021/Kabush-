@@ -406,6 +406,8 @@ final class Tab: ObservableObject, Identifiable {
     var onZoom: ((Tab, CGFloat) -> Void)?
     /// The resolved address under the pointer, or nil when it leaves a link.
     var onLink: ((Tab, String?) -> Void)?
+    /// The page took the keys (see PageView.onKeys).
+    var onKeys: ((Tab) -> Void)?
 
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
@@ -568,6 +570,7 @@ final class Tab: ObservableObject, Identifiable {
         Swipe.calm(web)
         web.onPull = { [weak self] pull in self?.pull = pull }
         web.onTouch = { [weak self] in self?.uncover() }
+        web.onKeys = { [weak self] in if let self { self.onKeys?(self) } }
         web.searchName = { [weak self] in self?.searchName?() }
         web.onSearch = { [weak self] text in
             guard let self else { return }
@@ -1271,6 +1274,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil
+        web.onKeys = nil
         web.searchName = nil
         web.onSearch = nil
         web.stopLoading()
@@ -1477,6 +1481,15 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    /// Told when the keys come to this page, however they got here — a
+    /// click, or Tab walked past the other page's last field.
+    var onKeys: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let took = super.becomeFirstResponder()
+        if took { onKeys?() }
+        return took
+    }
 
     override func mouseDown(with event: NSEvent) {
         onTouch?()

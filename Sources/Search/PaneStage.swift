@@ -23,6 +23,7 @@ struct PaneStageView: NSViewRepresentable {
     let focus: (Tab) -> Void
     let frames: ([Tab.ID: CGRect]) -> Void
     let action: (PaneStage.Action) -> Void
+    let hover: (Tab.ID?) -> Void
 
     func makeNSView(context: Context) -> PaneStage { PaneStage() }
 
@@ -31,6 +32,7 @@ struct PaneStageView: NSViewRepresentable {
         stage.onFocus = focus
         stage.onFrames = frames
         stage.onAction = action
+        stage.onHover = hover
         stage.show(tabs, split: split, focused: focused)
     }
 }
@@ -43,6 +45,9 @@ final class PaneStage: NSView {
     var onFrames: (([Tab.ID: CGRect]) -> Void)?
     /// The divider's menu.
     var onAction: ((Action) -> Void)?
+    /// The page under the pointer, as it changes; nil off the stage.
+    var onHover: ((Tab.ID?) -> Void)?
+    private var hovered: Tab.ID?
 
     enum Action { case swap, even, separate, closeBoth }
 
@@ -351,6 +356,34 @@ final class PaneStage: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         watchClicks()
+    }
+
+    // MARK: - the page under the pointer
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited,
+                                                              .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        let under = paired ? slots.indices.first { $0 < tabs.count && slots[$0].frame.contains(point) }.map { tabs[$0].id } : nil
+        hover(under)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover(nil)
+    }
+
+    private func hover(_ id: Tab.ID?) {
+        guard hovered != id else { return }
+        hovered = id
+        onHover?(id)
     }
 }
 

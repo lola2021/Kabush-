@@ -114,7 +114,7 @@ Turn on **Settings › General › Let a script drive Search** and the running a
 
 Bench tabs are never selected for you, never enter the session or the history, and go when the script says so. It is how this browser is tested while somebody is using it.
 
-`python3 Tests/split_view.py` builds and runs Split View regressions in a separate test app, started hidden, with its own settings, session and local page fixtures, all removed afterwards. Add `--interactive` to leave that test app open, on screen, for checking the divider, focus and tab dragging by hand.
+`python3 Tests/split_view.py`, after `./build.sh`, checks Split View through the app's own model in a hidden test run with its own settings and files, all removed afterwards. It never makes or shows a window; what can only be seen (dragging onto a page's edge, the divider under the pointer, the motion) is checked by hand on a release candidate.
 
 ### Contributing
 

@@ -2431,6 +2431,13 @@ final class Bench {
             guard let page = tab() else { answer(["error": "split closeOthers needs id"]); return }
             browser.closeOthers(but: page)
             reply()
+        case "keys":
+            // The keys handed to a page's view, as the key-view loop would.
+            guard let page = tab(), let web = page.built, let window = web.window else {
+                answer(["error": "split keys needs the id of a page on screen"]); return
+            }
+            window.makeFirstResponder(web)
+            reply()
         case "motion":
             // The pictures moving on the stage now (see PaneStage.animate).
             func stage(in view: NSView) -> PaneStage? {

@@ -1,573 +1,436 @@
 #!/usr/bin/env python3
-"""Offline regression checks for Split View through Search's real Browser model.
+"""Split View, checked through Search's own model in a hidden probe.
 
-Run with `python3 Tests/split_view.py`. The runner builds a uniquely identified
-debug app bundle and SEARCH_PROBE world, starts only that executable, and serves
-all test pages and the updater feed from localhost.
+Build first (`./build.sh` or `./build.sh debug`), then run
+`python3 Tests/split_view.py`. The app is started hidden in a world of its
+own (SEARCH_PROBE=split-tests), driven through ./bench's socket, and quit;
+its settings and files are removed afterwards. Nothing here makes, shows or
+brings forward a window: what can only be seen — dragging onto a page's
+edge, the divider under the pointer, the motion itself — is checked by
+hand on a release candidate.
 """
-
-from __future__ import annotations
 
 import json
 import os
-import plistlib
-import shutil
-import signal
 import socket
 import subprocess
 import sys
 import threading
 import time
-import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
 
-
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = ROOT / ".build"
-FIRST_SPACE = "00000000-0000-0000-0000-000000000001"
-
-
-class Fixture(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        if self.path == "/appcast.json":
-            body = json.dumps({
-                "version": "0.0.0",
-                "build": 0,
-                "url": f"http://127.0.0.1:{self.server.server_port}/Search.zip",
-                "dmg": f"http://127.0.0.1:{self.server.server_port}/Search.dmg",
-            }).encode()
-            kind = "application/json"
+APP = str(ROOT / "build" / "Search.app")
+W = "split-tests"
+HOME = os.path.expanduser("~")
+SUPPORT = f"{HOME}/Library/Application Support/Search ({W})"
+SUITE = f"com.officecommun.search.test.{W}"
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        port = self.server.server_port
+        if self.path == "/asker":
+            body = f"<!doctype html><title>asker</title><iframe src='http://localhost:{port}/frame'></iframe>".encode()
+        elif self.path == "/frame":
+            body = b"<!doctype html><script>setTimeout(function(){ alert('from the frame') }, 1200)</script>"
         else:
-            name = self.path.strip("/").split("?", 1)[0] or "page"
-            title = name.replace("-", " ").title()
-            body = (
-                "<!doctype html><meta charset=utf-8>"
-                f"<title>{title}</title><h1>{title}</h1><textarea id='split-draft'>fixture</textarea>"
-                f"<a href='/linked'>linked</a>"
-            ).encode()
-            kind = "text/html; charset=utf-8"
-        self.send_response(200)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(body)
+            body = f"<!doctype html><title>{self.path.strip('/')}</title><p>{self.path}".encode()
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+srv = ThreadingHTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+BASE = f"http://127.0.0.1:{srv.server_port}"
+def pids(): return subprocess.run(["pgrep", "-f", APP + "/Contents/MacOS"], capture_output=True, text=True).stdout.split()
+def wipe():
+    subprocess.run(["rm", "-rf", SUPPORT]); subprocess.run(["defaults", "delete", SUITE], capture_output=True)
+def setup(**prefs):
+    for p in pids(): subprocess.run(["kill", p])
+    time.sleep(1); wipe()
+    for k in ["bench", "welcomed"]: subprocess.run(["defaults", "write", SUITE, k, "-bool", "true"])
+    for k, v in prefs.items(): subprocess.run(["defaults", "write", SUITE, k, "-bool", "true" if v else "false"])
+def launch():
+    sock = f"{SUPPORT}/bench.sock"
+    if os.path.exists(sock): os.remove(sock)
+    subprocess.run(["open", "-n", "-g", "-j", "--env", f"SEARCH_PROBE={W}", APP])
+    for _ in range(150):
+        if os.path.exists(sock): break
+        time.sleep(0.1)
+    time.sleep(2)
+def quit():
+    try: cmd({"do": "quit"})
+    except Exception: pass
+    for _ in range(30):
+        if not pids(): break
+        time.sleep(0.2)
+    for p in pids(): subprocess.run(["kill", p])
+def cmd(req):
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+        c.settimeout(30); c.connect(f"{SUPPORT}/bench.sock"); c.sendall(json.dumps(req).encode() + b"\n")
+        data = b""
+        while True:
+            ch = c.recv(65536)
+            if not ch: break
+            data += ch
+    a = json.loads(data.split(b"\n", 1)[0] or b"{}")
+    if "error" in a: raise RuntimeError(f"{req}: {a['error']}")
+    return a
+def sp(action, **f): return cmd({"do": "split", "action": action, **f})
+def page(name):
+    r = sp("open", url=f"{BASE}/{name}")["resultID"]; time.sleep(0.7); return r
+def session(space=None):
+    f = f"{SUPPORT}/session.json" if not space else f"{SUPPORT}/session-{space}.json"
+    return json.load(open(f))
+class T:
+    def __init__(self): self.passed = self.failed = 0
+    def ok(self, name, cond, extra=""):
+        if cond: self.passed += 1; print("  ok  ", name)
+        else: self.failed += 1; print("  FAIL", name, extra)
+    def done(self):
+        print(f"{self.passed} passed, {self.failed} failed")
+def finish():
+    quit(); time.sleep(0.5); wipe()
 
-    def log_message(self, *_: object) -> None:
-        pass
+
+def frames(st): return {f["id"]: f for f in st["paneFrames"]}
+def order(st): return [x["id"] for x in st["tabs"]]
+def url(st, id): return next(x["url"] for x in st["tabs"] if x["id"] == id)
+def ev(id, js): return cmd({"do": "eval", "id": id, "js": js}).get("value")
+def qs(): return sp("state")["questions"]
+def sample(n=12, every=0.03):
+    out = []
+    for _ in range(n):
+        out.append(sp("motion")["motion"]); time.sleep(every)
+    return out
 
 
-class Launched:
-    """The test app started hidden through `open`, followed by its pid."""
+def case_slice1(t):
+    """pairs, the file, off keeps pairs"""
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b"); c = page("c")
+    st = sp("pair", id=b, **{"with": a}, side="right")
+    p = st["splits"][0]
+    t.ok("pair is [a, b], horizontal, even", p["tabs"] == [a, b] and p["axis"] == "horizontal" and p["sizes"] == [0.5, 0.5], p)
+    t.ok("focused is the dragged page", p["focused"] == b, p)
+    st = sp("focus", id=a); t.ok("focus a remembered", st["splits"][0]["focused"] == a)
+    sp("fraction", split=p["id"], fraction=0.3)
+    st = sp("select", id=c)
+    t.ok("leaving the pair keeps its focus", st["splits"][0]["focused"] == a)
+    sp("save"); s = session()
+    urls = [e["url"] for e in s["tabs"]]
+    ia, ib = urls.index(f"{BASE}/a"), urls.index(f"{BASE}/b")
+    sv = s.get("splits", [])
+    t.ok("file: pair by places, sizes, axis, focused", len(sv) == 1 and sv[0]["tabs"] == [ia, ib] and abs(sv[0]["sizes"][0] - 0.3) < 1e-9 and sv[0]["axis"] == "horizontal" and sv[0]["focused"] == ia, sv)
+    # switch off keeps the pair
+    st = sp("enabled", on=False)
+    t.ok("off: pair kept in the model", len(st["splits"]) == 1, st["splits"])
+    t.ok("off: both tabs in the row", a in st["displayedIDs"] and b in st["displayedIDs"])
+    st = sp("select", id=a)
+    t.ok("off: one page on screen", st["visibleIDs"] == [a], st["visibleIDs"])
+    sp("save"); t.ok("off: still written", len(session().get("splits", [])) == 1)
+    # relaunch with the switch off, then on
+    quit(); launch()
+    st = sp("state")
+    ids = {t_["url"]: t_["id"] for t_ in st["tabs"]}
+    a, b, c = ids[f"{BASE}/a"], ids[f"{BASE}/b"], ids[f"{BASE}/c"]
+    t.ok("relaunch off: pair restored, waiting", len(st["splits"]) == 1 and st["splits"][0]["tabs"] == [a, b] and abs(st["splits"][0]["sizes"][0] - 0.3) < 1e-9, st["splits"])
+    t.ok("relaunch off: focus restored", st["splits"][0]["focused"] == a)
+    st = sp("enabled", on=True)
+    st = sp("select", id=a)
+    t.ok("on again: pair on screen", set(st["visibleIDs"]) == {a, b}, st["visibleIDs"])
+    # off, pull the pair apart, on: it goes
+    sp("enabled", on=False)
+    sp("move", id=c, to=[x["id"] for x in sp("state")["tabs"]].index(b))
+    st = sp("state"); order = [x["id"] for x in st["tabs"]]
+    t.ok("off: c moved between a and b", order.index(c) == order.index(a) + 1, order)
+    st = sp("enabled", on=True)
+    t.ok("on: a pair that came apart is dropped", len(st["splits"]) == 0, st["splits"])
+    # empty pane: never written
+    sp("select", id=c); st = sp("start")
+    t.ok("⌃⌘S: pair with an empty page", len(st["splits"]) == 1)
+    sp("save"); s = session()
+    t.ok("empty page not written, nor its pair", "about:blank" not in json.dumps(s) and len(s.get("splits", [])) == 0, s.get("splits"))
 
-    def __init__(self, executable: Path) -> None:
-        self.executable = str(executable)
-        self.pid: int | None = None
-        self.returncode: int | None = None
 
-    def _find(self) -> int | None:
-        if self.pid is None:
-            found = subprocess.run(["/usr/bin/pgrep", "-f", self.executable], capture_output=True, text=True).stdout.split()
-            self.pid = int(found[-1]) if found else None
-        return self.pid
+def case_slice1b(t):
+    """an old file, pins, groups"""
+    setup(splitView=True, **{"tabs.groups": True})
+    os.makedirs(SUPPORT, exist_ok=True)
+    legacy = {"tabs": [{"url": f"{BASE}/x", "title": "x"}, {"url": f"{BASE}/y", "title": "y"}, {"url": "about:blank", "title": ""}],
+              "active": 1, "splits": [{"left": 0, "right": 1, "fraction": 0.35}]}
+    json.dump(legacy, open(f"{SUPPORT}/session.json", "w"))
+    launch()
+    st = sp("state"); ids = {x["url"]: x["id"] for x in st["tabs"]}
+    x, y = ids.get(f"{BASE}/x"), ids.get(f"{BASE}/y")
+    t.ok("#381's first file shape still reads", len(st["splits"]) == 1 and st["splits"][0]["tabs"] == [x, y] and abs(st["splits"][0]["sizes"][0] - 0.35) < 1e-9, st["splits"])
+    t.ok("its about:blank entry is dropped", not any(e["blank"] for e in st["tabs"]), [e["url"] for e in st["tabs"]])
+    c = page("c")
+    cmd({"do": "pin", "id": c}); sp("select", id=c); st = sp("start")
+    t.ok("pin: split with a copy, pin kept out of the pair", not any(c in p["tabs"] for p in st["splits"]) and cmd({"do": "pin", "id": c, "home": True})["pin"] != "")
+    sp("dismiss")
+    st = sp("group", id=y); g = st["groups"][-1]["id"]
+    gid = dict(zip([e["id"] for e in st["tabs"]], st["groupIDs"]))
+    t.ok("half into a group: both go, pair holds", gid[x] == g and gid[y] == g and len(st["splits"]) == 1)
+    sp("save"); quit(); launch()
+    st = sp("state")
+    t.ok("grouped pair survives a relaunch", len(st["splits"]) == 1, st["splits"])
 
-    def poll(self) -> int | None:
-        pid = self._find()
-        if pid is None:
-            return None
+
+def case_slice2(t):
+    """the stage and its divider"""
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b"); c = page("c")
+    sp("select", id=a); time.sleep(0.5)
+    st = sp("state"); fa = frames(st).get(a)
+    t.ok("one page fills the stage", fa is not None and fa["x"] == 0, st["paneFrames"])
+    full = fa["width"]
+    st = sp("pair", id=b, **{"with": a}, side="right"); time.sleep(0.8); st = sp("state")
+    f = frames(st)
+    t.ok("two pages, side by side", a in f and b in f and f[a]["x"] == 0 and f[b]["x"] > f[a]["width"], st["paneFrames"])
+    gut = f[b]["x"] - f[a]["width"]
+    t.ok("a 7 pt gutter", abs(gut - 7) < 0.6, gut)
+    t.ok("even halves", abs(f[a]["width"] - f[b]["width"]) < 1, (f[a]["width"], f[b]["width"]))
+    x = f[a]["width"] + 3.5; y = f[a]["y"] + f[a]["height"] / 2
+    # drag the divider left, hold
+    st = sp("mouse", points=[[x, y], [x - 60, y], [x - 120, y], [x - 160, y]], hold=True, to="view"); time.sleep(0.3); st = sp("state")
+    m = frames(st)
+    t.ok("held: pages follow the hand", m[a]["width"] < f[a]["width"] - 140, (f[a]["width"], m[a]["width"]))
+    t.ok("held: the pair isn't told yet", abs(st["splits"][0]["fraction"] - 0.5) < 1e-9, st["splits"][0]["fraction"])
+    st = sp("mouse", points=[[x - 160, y]], resume=True, to="view"); time.sleep(0.3); st = sp("state")
+    e = frames(st)
+    t.ok("released: told once", st["splits"][0]["fraction"] < 0.45, st["splits"][0]["fraction"])
+    t.ok("released: pages stay put", abs(e[a]["width"] - m[a]["width"]) < 1.5, (m[a]["width"], e[a]["width"]))
+    # snap at even
+    x2 = e[a]["width"] + 3.5
+    room = full - 7
+    st = sp("mouse", points=[[x2, y], [room / 2 + 3.5 - 30, y], [room / 2 + 3.5 - 10, y], [room / 2 + 3.5 - 10, y]], to="view"); time.sleep(0.3); st = sp("state")
+    t.ok("snaps to even within 15 pt", abs(st["splits"][0]["fraction"] - 0.5) < 1e-6, st["splits"][0]["fraction"])
+    # never narrower than 250
+    x3 = frames(st)[a]["width"] + 3.5
+    st = sp("mouse", points=[[x3, y], [200, y], [20, y], [20, y]], to="view"); time.sleep(0.3); st = sp("state")
+    t.ok("a page stays at least 250 pt", abs(frames(st)[a]["width"] - 250) < 1, frames(st)[a]["width"])
+    # double-click evens out
+    x4 = frames(st)[a]["width"] + 3.5
+    st = sp("mouse", points=[[x4, y], [x4, y]], clicks=2, to="view"); time.sleep(0.4); st = sp("state")
+    t.ok("double-click evens out", abs(st["splits"][0]["fraction"] - 0.5) < 1e-6, st["splits"][0]["fraction"])
+    # click in the other page focuses it
+    sp("focus", id=a); f = frames(sp("state"))
+    st = sp("mouse", points=[[f[b]["x"] + 100, y], [f[b]["x"] + 100, y]]); time.sleep(0.4); st = sp("state")
+    t.ok("a click in the other page focuses it", st["activeID"] == b, st["activeID"])
+    st = sp("keys", id=a); time.sleep(0.3); st = sp("state")
+    t.ok("the keys going to the other page focus it", st["activeID"] == a, st["activeID"])
+    sp("focus", id=b)
+    # narrow window: focused page alone, pair kept
+    cmd({"do": "ui", "sidebar": True}); cmd({"do": "resize", "width": 700, "height": 700, "steps": 1}); time.sleep(1); st = sp("state")
+    t.ok("too narrow: the focused page alone", list(frames(st).keys()) == [b] and len(st["splits"]) == 1, (st["paneFrames"], st["splits"]))
+    cmd({"do": "resize", "width": 1180, "height": 780, "steps": 1}); time.sleep(1); st = sp("state")
+    cmd({"do": "ui", "sidebar": False}); time.sleep(1)
+    t.ok("room again: both back", set(frames(st).keys()) == {a, b}, st["paneFrames"])
+    # the stage isn't rebuilt: tab switches keep the same slots
+    st = sp("select", id=c); time.sleep(0.4); st = sp("state")
+    t.ok("a tab alone fills the stage again", list(frames(st).keys()) == [c] and abs(frames(st)[c]["width"] - full) < 1, st["paneFrames"])
+    st = sp("select", id=a); time.sleep(0.4); st = sp("state")
+    t.ok("back to the pair: both", set(frames(st).keys()) == {a, b})
+
+
+def case_slice3(t):
+    """the row"""
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b"); c = page("c")
+    sp("pair", id=b, **{"with": a}, side="right"); sp("focus", id=b)
+    st = sp("select", id=c)
+    st = sp("step", direction=-1)
+    t.ok("⌃⇧Tab back into the pair: the page focused last", st["activeID"] == b, st["activeID"])
+    st = sp("step", direction=1)
+    t.ok("⌃Tab out of the pair: the next tab, not the other half", st["activeID"] == c, st["activeID"])
+    sp("select", id=a)
+    st = sp("state")
+    t.ok("clicking a half still gives that half", st["activeID"] == a)
+    sp("focus", id=b); time.sleep(0.8)
+
+
+def case_slice4(t):
+    """in and out"""
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b"); c = page("c"); d = page("d")
+    sp("select", id=a)
+    st = sp("openIn", id=c)
+    p = st["splits"][0] if st["splits"] else {}
+    t.ok("Open in Split View: c beside the page on screen", p.get("tabs") == [a, c] and st["activeID"] == c, st["splits"])
+    t.ok("…and next to it in the row", order(st).index(c) == order(st).index(a) + 1, order(st))
+    st = sp("side", left=True); t.ok("⌃⌘←: the left page", st["activeID"] == a)
+    st = sp("side", left=False); t.ok("⌃⌘→: the right page", st["activeID"] == c)
+    sp("fraction", split=p["id"], fraction=0.3)
+    st = sp("swap")
+    q = st["splits"][0]
+    t.ok("swap: order reversed in the pair", q["tabs"] == [c, a], q)
+    t.ok("swap: sizes follow their pages", abs(q["sizes"][0] - 0.7) < 1e-9, q["sizes"])
+    t.ok("swap: order reversed in the row", order(st).index(a) == order(st).index(c) + 1, order(st))
+    t.ok("swap: focus stays on its page", st["activeID"] == c)
+    st = sp("even"); t.ok("even out", st["splits"][0]["sizes"] == [0.5, 0.5])
+    # close a page, then ⇧⌘T puts it back in its pair
+    st = sp("close", id=c)
+    t.ok("⌘W on a page: pair gone, the other page in front", not st["splits"] and st["activeID"] == a, (st["splits"], st["activeID"]))
+    st = sp("reopen"); time.sleep(0.8); st = sp("state")
+    back = [x["id"] for x in st["tabs"] if x["url"].endswith("/c")]
+    t.ok("⇧⌘T: back into its pair, on its side", len(st["splits"]) == 1 and back and st["splits"][0]["tabs"] == [back[0], a], st["splits"])
+    c = back[0]
+    # empty page: start, fill with an open tab
+    sp("select", id=d); st = sp("start")
+    blank = st["splits"][-1]["right"]
+    st = sp("fill", id=blank, **{"with": b})
+    pr = [x for x in st["splits"] if d in x["tabs"]]
+    t.ok("an empty page takes an open tab", pr and pr[0]["tabs"] == [d, b] and blank not in order(st) and st["activeID"] == b, (st["splits"], order(st)))
+    t.ok("…next to its partner in the row", order(st).index(b) == order(st).index(d) + 1, order(st))
+    # empty page: Esc cancels
+    sp("detach", id=d); sp("select", id=d); st = sp("start")
+    blank = st["splits"][-1]["right"]
+    st = sp("dismiss")
+    t.ok("Esc on an empty page cancels it", blank not in order(st) and not any(d in x["tabs"] for x in st["splits"]) and st["activeID"] == d, (st["splits"], st["activeID"]))
+    # close both
+    sp("select", id=a); n = len(order(sp("state")))
+    st = sp("closeBoth")
+    t.ok("Close Both closes the pair's two pages", a not in order(st) and c not in order(st) and len(order(st)) == n - 2, order(st))
+
+
+def case_slice5a(t):
+    """with the rest"""
+    def order(st): return [x["id"] for x in st["tabs"]]
+    setup(splitView=True, spaces=True); launch()
+    m = page("mail"); a = page("apple-apple"); b = page("apple-apple-apple"); x = page("x")
+    cmd({"do": "pin", "id": m})
+    # ⌥⌘N on a pin: a copy of its page and an empty page; the pin stays
+    sp("select", id=m); st = sp("start"); time.sleep(0.6); st = sp("state")
+    p = st["splits"][-1]
+    t.ok("⌥⌘N on a pin: the pin stays pinned, out of the pair", m in st["pins"] and m not in p["tabs"], (st["pins"], p))
+    t.ok("…its page is in the pair as a tab of its own", url(st, p["tabs"][0]).endswith("/mail"), url(st, p["tabs"][0]))
+    sp("dismiss")
+    # dragging a tab onto a pin's page: a copy, pin untouched
+    sp("select", id=m); st = sp("pair", id=x, **{"with": m}, side="right"); time.sleep(0.6); st = sp("state")
+    p = [q for q in st["splits"] if x in q["tabs"]][0]
+    t.ok("a tab onto a pin's page: pair with a copy, pin kept", m in st["pins"] and m not in p["tabs"] and url(st, p["tabs"][0]).endswith("/mail"), (st["pins"], p))
+    copy = p["tabs"][0]
+    # Close Other Tabs keeps the partner
+    st = sp("closeOthers", id=x)
+    t.ok("Close Other Tabs keeps the other page of the pair", x in order(st) and copy in order(st) and a not in order(st) and b not in order(st), order(st))
+    # find keeps its needle across pages
+    a = page("apple-apple"); b = page("apple-apple-apple")
+    sp("select", id=a); sp("pair", id=b, **{"with": a}, side="right"); sp("focus", id=a); time.sleep(0.8)
+    r = cmd({"do": "find", "text": "apple"})
+    t.ok("find in the left page", r["status"].endswith("of 2"), r)
+    st = sp("focus", id=b); time.sleep(1.2); st = sp("state")
+    t.ok("focus moves: find stays open with its words", st["finding"] and st["needle"] == "apple", (st["finding"], st["needle"]))
+    t.ok("…and looks in the other page", st["findStatus"].endswith("of 3"), st["findStatus"])
+    # moving a page to another space leaves its partner in front
+    first = sp("state")["spaceID"]
+    sp("space", spaceAction="new", name="Two"); time.sleep(1)
+    other = [k for k in sp("rows")["rows"].keys() if k != first][0]
+    sp("space", spaceAction="go", spaceID=first); time.sleep(1)
+    sp("focus", id=b)
+    st = sp("moveSpace", id=b, spaceID=other); time.sleep(0.8); st = sp("state")
+    t.ok("a page moved to another Space: its partner is in front", st["activeID"] == a and b not in order(st), (st["activeID"], order(st)))
+
+
+def case_slice5b(t):
+    """questions over one page"""
+    def ev(id, js): return cmd({"do": "eval", "id": id, "js": js}).get("value")
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b")
+    sp("pair", id=b, **{"with": a}, side="right"); sp("focus", id=a); time.sleep(0.8)
+    ev(b, "setTimeout(function(){ window.__r = confirm('Leave this page?') }, 0); 1"); time.sleep(1.5)
+    st = sp("state"); q = st["questions"]
+    t.ok("confirm from the other page: a card over it", len(q) == 1 and q[0]["tab"] == b and q[0]["kind"] == "confirm" and q[0]["message"] == "Leave this page?", q)
+    t.ok("named for the site asking", q and q[0]["host"] == "127.0.0.1", q)
+    t.ok("focus stays where it was", st["activeID"] == a)
+    t.ok("not held for later, not a sheet", st["held"] == {}, st["held"])
+    sp("answer", id=b, ok=True); time.sleep(0.4)
+    t.ok("OK answers true, once", ev(b, "window.__r") is True and qs() == [])
+    ev(b, "setTimeout(function(){ window.__r = prompt('Name?', 'x') }, 0); 1"); time.sleep(1.5)
+    t.ok("prompt: a card", qs() and qs()[0]["kind"] == "prompt")
+    sp("answer", id=b, ok=True, text="hello"); time.sleep(0.4)
+    t.ok("prompt answers what was typed", ev(b, "window.__r") == "hello")
+    ev(b, "setTimeout(function(){ window.__r = prompt('Name?') }, 0); 1"); time.sleep(1.5)
+    sp("answer", id=b, ok=False); time.sleep(0.4)
+    t.ok("prompt cancelled answers null", ev(b, "window.__r") is None)
+    # a page asking again and again: one at a time, in order
+    ev(b, "setTimeout(function(){ window.__n = 0; for (var i = 0; i < 3; i++) { alert('again ' + i); window.__n++ } }, 0); 1"); time.sleep(1.5)
+    seen = []
+    for i in range(3):
+        q = qs(); seen.append((len(q), q[0]["message"] if q else None))
+        sp("answer", id=b, ok=True); time.sleep(0.5)
+    t.ok("asked again and again: one card at a time, in order", seen == [(1, "again 0"), (1, "again 1"), (1, "again 2")], seen)
+    t.ok("…every one answered", ev(b, "window.__n") == 3)
+    # the other page keeps working meanwhile
+    ev(b, "setTimeout(function(){ confirm('Still there?') }, 0); 1"); time.sleep(1.5)
+    t.ok("the other page answers while one waits", ev(a, "1 + 1") == 2)
+    # closed while asking: answered as dismissed, no hang
+    st = sp("close", id=b); time.sleep(0.4)
+    t.ok("page closed while asking: its card goes", qs() == [])
+    b = page("b2"); sp("pair", id=b, **{"with": a}, side="right"); time.sleep(0.8)
+    ev(b, "setTimeout(function(){ confirm('Leave?') }, 0); 1"); time.sleep(1.5)
+    sp("go", id=b, url=f"{BASE}/elsewhere") if False else cmd({"do": "go", "id": b, "url": f"{BASE}/elsewhere"}); time.sleep(1.5)
+    t.ok("page gone elsewhere: its card goes", qs() == [], qs())
+    ev(b, "setTimeout(function(){ confirm('Leave?') }, 0); 1"); time.sleep(1.5)
+    sp("enabled", on=False); time.sleep(0.4)
+    t.ok("Split View off: the card is answered as dismissed", qs() == [])
+    sp("enabled", on=True); sp("select", id=a); time.sleep(0.5)
+    # a frame from another site is named as itself
+    c = page("asker"); sp("pair", id=c, **{"with": a}, side="right"); sp("focus", id=a); time.sleep(3)
+    q = qs()
+    t.ok("a frame from another site is named as itself", q and q[0]["tab"] == c and q[0]["host"] == "localhost", q)
+    if q: sp("answer", id=c, ok=True)
+    # one page alone: the sheet path as before (a test run writes it down)
+    sp("detach", id=a); sp("select", id=a); time.sleep(0.5)
+    ev(a, "setTimeout(function(){ alert('alone') }, 0); 1"); time.sleep(1.5)
+    t.ok("a page alone: no card, the usual way", qs() == [])
+
+
+def case_slice6(t):
+    """moving"""
+    setup(splitView=True); launch()
+    a = page("a"); b = page("b"); sp("select", id=a); time.sleep(0.6)
+    full = [f for f in sp("state")["paneFrames"] if f["id"] == a][0]["width"]
+    sp("pair", id=b, **{"with": a}, side="right")
+    s = sample()
+    moving = [m for m in s if m]
+    t.ok("enter: the page on screen moves as a picture", bool(moving), s[:3])
+    if moving:
+        m = moving[0][0]
+        t.ok("…from full width to its half", abs(m["from"][2] - full) < 1 and abs(m["to"][2] - (full - 7) / 2) < 1, m)
+        mids = [x[0]["now"][2] for x in moving if x]
+        t.ok("…through the widths between", any(m["to"][2] + 5 < w < m["from"][2] - 5 for w in mids), mids)
+    time.sleep(0.8)
+    t.ok("the pictures are gone once it is over", sp("motion")["motion"] == [])
+    st = sp("state"); f = {x["id"]: x for x in st["paneFrames"]}
+    t.ok("pages laid out at their new size", abs(f[a]["width"] - (full - 7) / 2) < 1)
+    sp("swap"); s = sample(8); moving = [m for m in s if m]
+    t.ok("swap: both pictures travel", moving and len(moving[0]) == 2, s[:2])
+    time.sleep(0.8)
+    sp("fraction", split=st["splits"][0]["id"], fraction=0.3); time.sleep(0.8)
+    sp("even"); s = sample(8); moving = [m for m in s if m]
+    t.ok("even out: the pages move to even halves", moving and all(abs(x["to"][2] - (full - 7) / 2) < 1 for x in moving[0]), s[:2])
+    time.sleep(0.8)
+    sp("close", id=b); s = sample(8); moving = [m for m in s if m]
+    t.ok("leave: the other grows to full width", moving and any(abs(x["to"][2] - full) < 1 for x in moving[0]), s[:2])
+    time.sleep(0.8)
+    c = page("c"); sp("select", id=a)
+    s = sample(4)
+    t.ok("a tab switch is a cut", all(m == [] for m in s), s)
+
+
+
+def main():
+    t = T()
+    for case in [case_slice1, case_slice1b, case_slice2, case_slice3, case_slice4, case_slice5a, case_slice5b, case_slice6]:
+        print(f"— {case.__doc__}")
         try:
-            os.kill(pid, 0)
-            return None
-        except ProcessLookupError:
-            self.returncode = 0
-            return 0
-
-    def terminate(self) -> None:
-        if self._find() is not None:
-            try:
-                os.kill(self.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
-    def kill(self) -> None:
-        if self._find() is not None:
-            try:
-                os.kill(self.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-
-    def wait(self, timeout: float) -> int:
-        deadline = time.monotonic() + timeout
-        while self.poll() is None:
-            if time.monotonic() > deadline:
-                raise subprocess.TimeoutExpired(self.executable, timeout)
-            time.sleep(0.1)
-        return self.returncode or 0
-
-
-class Runner:
-    def __init__(self, shown: bool = False) -> None:
-        self.shown = shown
-        self.world = "split-test-" + uuid.uuid4().hex[:10]
-        self.bundle_id = f"com.officecommun.search.splitrunner.{self.world}"
-        self.bundle = BUILD / f"SplitViewTests-{self.world}.app"
-        self.executable = self.bundle / "Contents" / "MacOS" / "Search"
-        self.suite = f"com.officecommun.search.test.{self.world}"
-        self.support = Path.home() / "Library" / "Application Support" / f"Search ({self.world})"
-        self.log_path = BUILD / f"split-view-{self.world}.log"
-        self.log_file = None
-        self.process: subprocess.Popen[bytes] | None = None
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
-        self.server_thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.port = self.server.server_port
-        self.feed = f"http://127.0.0.1:{self.port}/appcast.json"
-        self.socket_path = self.support / "bench.sock"
-        self.passed = 0
-        self.failed = 0
-
-    def build(self) -> None:
-        BUILD.mkdir(parents=True, exist_ok=True)
-        developer = subprocess.check_output(["/usr/bin/xcode-select", "-p"], text=True).strip()
-        swift = Path(developer) / "Toolchains" / "XcodeDefault.xctoolchain" / "usr" / "bin" / "swift"
-        sdk = subprocess.check_output(
-            ["/usr/bin/xcrun", "--sdk", "macosx", "--show-sdk-path"], text=True
-        ).strip()
-        build_env = os.environ.copy()
-        build_env["SDKROOT"] = sdk
-        subprocess.run(
-            [str(swift), "build", "--package-path", str(ROOT), "--sdk", sdk],
-            check=True, env=build_env,
-        )
-        binary = ROOT / ".build" / "debug" / "Search"
-        if not binary.is_file():
-            raise RuntimeError(f"debug binary was not built: {binary}")
-        contents = self.bundle / "Contents"
-        (contents / "MacOS").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(binary, self.executable)
-        info = {
-            "CFBundleName": "Split View Tests",
-            "CFBundleDisplayName": "Split View Tests",
-            "CFBundleExecutable": "Search",
-            "CFBundleIdentifier": self.bundle_id,
-            "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": "1.0.3",
-            "CFBundleVersion": "1",
-            "LSMinimumSystemVersion": "14.0",
-            "NSPrincipalClass": "NSApplication",
-        }
-        with (contents / "Info.plist").open("wb") as stream:
-            plistlib.dump(info, stream)
-        subprocess.run(["/usr/bin/defaults", "write", self.suite, "bench", "-bool", "true"], check=True)
-        subprocess.run(["/usr/bin/defaults", "write", self.suite, "welcomed", "-bool", "true"], check=True)
-        subprocess.run(["/usr/bin/defaults", "write", self.suite, "spaces", "-bool", "true"], check=True)
-        subprocess.run(["/usr/bin/defaults", "write", self.suite, "tabs.sleep", "-bool", "false"], check=True)
-
-    def start(self) -> None:
-        env = os.environ.copy()
-        env["SEARCH_PROBE"] = self.world
-        env["SEARCH_FEED"] = self.feed
-        self.log_file = self.log_path.open("ab")
-        if self.shown:
-            self.process = subprocess.Popen(
-                [str(self.executable)], env=env, cwd=ROOT,
-                stdout=self.log_file, stderr=subprocess.STDOUT, start_new_session=True,
-            )
-        else:
-            # Hidden, the way every test run of Search starts: nothing of it
-            # comes onto the screen, and it never takes the front.
-            subprocess.run(
-                ["/usr/bin/open", "-j", "-n", "-g", "--env", f"SEARCH_PROBE={self.world}",
-                 "--env", f"SEARCH_FEED={self.feed}", str(self.bundle)],
-                check=True,
-            )
-            self.process = Launched(self.executable)
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if self.process.poll() is not None:
-                raise RuntimeError(f"test app exited with {self.process.returncode}; see {self.log_path}")
-            if self.socket_path.exists():
-                try:
-                    self.request("state")
-                    return
-                except (FileNotFoundError, ConnectionRefusedError, TimeoutError):
-                    pass
-            time.sleep(0.1)
-        raise TimeoutError(f"test app did not open its bench socket; see {self.log_path}")
-
-    def stop(self) -> None:
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait(timeout=5)
-        self.process = None
-        if self.log_file:
-            self.log_file.close()
-            self.log_file = None
-
-    def command(self, request: dict[str, Any]) -> dict[str, Any]:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(30)
-            client.connect(str(self.socket_path))
-            client.sendall(json.dumps(request).encode() + b"\n")
-            chunks = []
-            while True:
-                chunk = client.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-        answer = json.loads(b"".join(chunks).split(b"\n", 1)[0] or b"{}")
-        if "error" in answer:
-            raise RuntimeError(f"{request.get('do')} {request.get('action', '')}: {answer['error']}")
-        return answer
-
-    def request(self, action: str, **fields: Any) -> dict[str, Any]:
-        return self.command({"do": "split", "action": action, **fields})
-
-    def evaluate(self, tab_id: str, javascript: str) -> Any:
-        return self.command({"do": "eval", "id": tab_id, "js": javascript}).get("value")
-
-    def expect(self, name: str, condition: bool) -> None:
-        if condition:
-            self.passed += 1
-            print(f"PASS {name}")
-        else:
-            self.failed += 1
-            print(f"FAIL {name}")
-
-    def page(self, name: str, *, from_id: str | None = None, foreground: bool = True, at_end: bool = False) -> str:
-        args: dict[str, Any] = {
-            "url": f"http://127.0.0.1:{self.port}/{name}",
-            "foreground": foreground,
-            "atEnd": at_end,
-        }
-        if from_id is not None:
-            args["from"] = from_id
-        return self.request("open", **args)["resultID"]
-
-    def state(self) -> dict[str, Any]:
-        return self.request("state")
-
-    def tab(self, state: dict[str, Any], tab_id: str) -> dict[str, Any]:
-        return next(tab for tab in state["tabs"] if tab["id"] == tab_id)
-
-    def index(self, state: dict[str, Any], tab_id: str) -> int:
-        return next(i for i, tab in enumerate(state["tabs"]) if tab["id"] == tab_id)
-
-    def session_path(self, space_id: str) -> Path:
-        name = "session.json" if space_id == FIRST_SPACE else f"session-{space_id}.json"
-        return self.support / name
-
-    def session(self, space_id: str) -> dict[str, Any]:
-        path = self.session_path(space_id)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and not path.exists():
-            time.sleep(0.05)
-        return json.loads(path.read_text())
-
-    def run(self) -> None:
-        self.server_thread.start()
-        self.build()
-        self.start()
-
-        self.expect("Split View is off in a fresh test world", not self.state()["enabled"])
-        self.request("enabled", on=True)
-
-        state = self.state()
-        initial = next(tab["id"] for tab in state["tabs"] if tab["blank"] and not tab["shy"])
-        a = self.page("a")
-        b = self.page("b")
-        c = self.page("c")
-        self.request("close", id=initial)
-
-        self.command({"do": "wait", "id": a, "seconds": 15})
-        self.request("select", id=a)
-        prepared = self.evaluate(a, "(() => { window.__splitMarker = 'split-state-survives'; document.querySelector('#split-draft').value = 'typed before pairing'; return 'ready'; })()")
-        self.expect("page fixture accepts live WebView state", prepared == "ready")
-
-        # Drop ordering is tested through Browser.pair, the same operation used
-        # by both the left and right drop zones.
-        state = self.request("pair", id=b, **{"with": a}, side="left")
-        pair = state["splits"][-1]
-        self.expect("drop right tab onto left side preserves order", pair["left"] == b and pair["right"] == a)
-        self.expect("paired tabs render as one strip item", b in state["displayedIDs"] and a not in state["displayedIDs"])
-        self.expect("both paired pages are visible", set(state["visibleIDs"]) == {a, b})
-        state = self.request("drop", id=b, before=a)
-        self.expect("dropping a paired tab onto itself or its partner is a no-op", len(state["splits"]) == 1 and state["splits"][0]["left"] == b and state["splits"][0]["right"] == a)
-        state = self.request("drop", id=a, before=b)
-        self.expect("the other half also cannot be dropped onto its partner", len(state["splits"]) == 1 and state["splits"][0]["left"] == b and state["splits"][0]["right"] == a)
-
-        state = self.request("focus", id=a)
-        self.expect("focus moves within the pair without changing visible pages", state["activeID"] == a and set(state["visibleIDs"]) == {a, b})
-        preserved = self.evaluate(a, "window.__splitMarker + '|' + document.querySelector('#split-draft').value")
-        self.expect("split and focus preserve the same page DOM and JavaScript state", preserved == "split-state-survives|typed before pairing")
-        slept = self.request("sleep", id=b)
-        self.expect("unfocused visible pane is protected from sleep", slept.get("sleepResult") == "on screen" and not self.tab(slept, b)["asleep"])
-
-        state = self.request("select", id=c)
-        self.expect("selecting an independent tab leaves the pair intact", len(state["splits"]) == 1 and state["activeID"] == c and state["visibleIDs"] == [c])
-        self.request("select", id=a)
-        preserved = self.evaluate(a, "window.__splitMarker + '|' + document.querySelector('#split-draft').value")
-        self.expect("returning to a split page preserves its DOM and JavaScript state", preserved == "split-state-survives|typed before pairing")
-
-        # Reverse the drop direction, then detach and close each side in turn.
-        state = self.request("pair", id=b, **{"with": a}, side="right")
-        pair = state["splits"][-1]
-        self.expect("drop left tab onto right side preserves order", pair["left"] == a and pair["right"] == b)
-        state = self.request("detach", id=b)
-        self.expect("detaching keeps both original tabs", not state["splits"] and {a, b}.issubset({tab["id"] for tab in state["tabs"]}))
-        preserved = self.evaluate(a, "window.__splitMarker + '|' + document.querySelector('#split-draft').value")
-        self.expect("detaching the pair preserves the existing page", preserved == "split-state-survives|typed before pairing")
-        state = self.request("pair", id=b, **{"with": a}, side="left")
-        state = self.request("close", id=b)
-        self.expect("closing left pane removes only that tab and split", all(tab["id"] != b for tab in state["tabs"]) and a in {tab["id"] for tab in state["tabs"]} and not state["splits"])
-
-        b = self.page("b-again")
-        state = self.request("pair", id=b, **{"with": a}, side="right")
-        state = self.request("close", id=b)
-        self.expect("closing right pane keeps the left tab", all(tab["id"] != b for tab in state["tabs"]) and a in {tab["id"] for tab in state["tabs"]} and not state["splits"])
-
-        b = self.page("b-third")
-        state = self.request("pair", id=b, **{"with": a}, side="left")
-        pair = state["splits"][-1]
-        # A page opened from either member should land after the group's right
-        # edge, while leaving the source page selected.
-        linked = self.page("linked-from-pane", from_id=a, foreground=False)
-        state = self.state()
-        self.expect("new page from a paired tab lands after the whole pair", self.index(state, linked) == self.index(state, pair["right"]) + 1)
-
-        state = self.request("drop", id=a, before=c)
-        self.expect("dropping one half before an outside tab detaches it in that order", not state["splits"] and self.index(state, b) < self.index(state, linked) < self.index(state, a) < self.index(state, c))
-        state = self.request("pair", id=b, **{"with": a}, side="left")
-        state = self.request("drop", id=a)
-        self.expect("dropping one half into the strip detaches but keeps both tabs", not state["splits"] and {a, b}.issubset({tab["id"] for tab in state["tabs"]}) and state["tabs"][-1]["id"] == a)
-        state = self.request("pair", id=b, **{"with": a}, side="left")
-
-        # Move a standalone tab from before the pair onto each raw member index.
-        # Browser.move must treat either half as the pair's displayed item.
-        state = self.request("move", id=linked, to=0)
-        state = self.request("move", id=linked, to=self.index(state, b))
-        moved_pair = next((item for item in state["splits"] if {item["left"], item["right"]} == {a, b}), None)
-        self.expect("moving a tab before onto split.left preserves adjacency", moved_pair is not None and self.index(state, moved_pair["right"]) == self.index(state, moved_pair["left"]) + 1)
-        state = self.request("move", id=linked, to=0)
-        state = self.request("move", id=linked, to=self.index(state, a))
-        moved_pair = next((item for item in state["splits"] if {item["left"], item["right"]} == {a, b}), None)
-        self.expect("moving a tab before onto split.right preserves adjacency", moved_pair is not None and self.index(state, moved_pair["right"]) == self.index(state, moved_pair["left"]) + 1)
-
-        # Moving the right member represents the whole group in the tab row.
-        pair = moved_pair
-        state = self.request("move", id=pair["right"], to=self.index(state, linked))
-        moved_pair = next((item for item in state["splits"] if {item["left"], item["right"]} == {a, b}), None)
-        self.expect("moving from split.right moves the whole pair", moved_pair is not None and self.index(state, moved_pair["right"]) == self.index(state, moved_pair["left"]) + 1 and self.index(state, moved_pair["left"]) > self.index(state, linked))
-
-        # A stale close index can land exactly on a split's right member.
-        # Both reopen and the Little-window insert path must skip past the pair.
-        pair = moved_pair
-        seam_ghost = self.page("restore-seam", from_id=pair["right"], foreground=False)
-        state = self.request("close", id=seam_ghost)
-        pair = next(item for item in state["splits"] if {item["left"], item["right"]} == {a, b})
-        prior = self.request("insert", url=f"http://127.0.0.1:{self.port}/insert-before-pair", index=self.index(state, pair["left"]))
-        state = prior
-        pair = next(item for item in state["splits"] if {item["left"], item["right"]} == {a, b})
-        self.expect("insert before a pair keeps both members adjacent", self.index(state, pair["right"]) == self.index(state, pair["left"]) + 1)
-        seam_insert = self.request("insert", url=f"http://127.0.0.1:{self.port}/insert-at-seam", index=self.index(state, pair["right"]))
-        state = seam_insert
-        pair = next(item for item in state["splits"] if {item["left"], item["right"]} == {a, b})
-        self.expect("inserting at the right-member seam goes after the pair", self.index(state, seam_insert["resultID"]) > self.index(state, pair["right"]) and self.index(state, pair["right"]) == self.index(state, pair["left"]) + 1)
-        state = self.request("reopen")
-        pair = next(item for item in state["splits"] if {item["left"], item["right"]} == {a, b})
-        self.expect("reopening at the saved right-member seam goes after the pair", self.index(state, state["activeID"]) > self.index(state, pair["right"]) and self.index(state, pair["right"]) == self.index(state, pair["left"]) + 1)
-
-        # Separate the pair before creating the paired-blank/new-tab case.
-        state = self.request("detach", id=b)
-        self.request("focus", id=a)
-        state = self.request("start")
-        blank_pair = state["splits"][-1]
-        paired_blank = blank_pair["right"]
-        state = self.request("newTab")
-        new_blank = state["activeID"]
-        self.expect("new tab does not reuse a blank pane already in a pair", paired_blank != new_blank and self.tab(state, paired_blank)["blank"] and self.tab(state, new_blank)["blank"] and all(new_blank not in (item["left"], item["right"]) for item in state["splits"]))
-        self.request("close", id=new_blank)
-
-        # A private group and a bench page are deliberately present while the
-        # real session writer runs. Neither may be serialized.
-        self.request("private")
-        private = self.state()["activeID"]
-        state = self.request("pair", id=private, **{"with": a}, side="left")
-        self.expect("ordinary and private tabs cannot form a split", len(state["splits"]) == 1 and self.tab(state, private)["shy"] and not self.tab(state, a)["shy"])
-        private_page = self.page("private-page")
-        state = self.request("start")
-        private_pair = state["splits"][-1]
-        bench = self.request("bench", url=f"http://127.0.0.1:{self.port}/bench-only")["resultID"]
-        before_bench_pair = len(state["splits"])
-        state = self.request("pair", id=bench, **{"with": a}, side="left")
-        self.expect("bench tabs cannot form a split", len(state["splits"]) == before_bench_pair and self.tab(state, bench)["bench"])
-        active_public = self.page("active-after-filter", from_id=a, at_end=True)
-        state = self.request("save")
-        self.expect("private and bench tabs are present only in the live model", self.tab(state, private)["shy"] and self.tab(state, private_page)["shy"] and self.tab(state, bench)["bench"])
-        personal = self.session(FIRST_SPACE)
-        saved_urls = [entry["url"] for entry in personal["tabs"]]
-        self.expect("session excludes private and bench page URLs", not any("private-page" in url or "bench-only" in url for url in saved_urls))
-        saved_splits = personal.get("splits", [])
-        saved_split_urls = [saved_urls[index] for pair in saved_splits for index in (pair["left"], pair["right"]) if 0 <= index < len(saved_urls)]
-        self.expect("session keeps ordinary splits while excluding private groups", bool(saved_splits) and len(saved_split_urls) == 2 * len(saved_splits) and not any("private" in url for url in saved_split_urls))
-        active_index = personal.get("active", -1)
-        live_state = self.state()
-        active_url = self.tab(live_state, active_public)["url"]
-        self.expect("public page was opened after private and bench entries", self.index(live_state, active_public) == len(live_state["tabs"]) - 1)
-        self.expect("saved active index is remapped to the selected public page", 0 <= active_index < len(saved_urls) and saved_urls[active_index] == active_url)
-
-        # Space one is committed on switch. Give space two its own split, then
-        # verify the files, parked in-memory row, and both rows after relaunch.
-        self.request("space", spaceAction="new", name="Split regression")
-        second = self.state()["spaceID"]
-        space_page = self.page("space-two")
-        state = self.request("start")
-        second_pair = state["splits"][-1]
-        second_fraction = 0.41
-        state = self.request("fraction", split=second_pair["id"], fraction=second_fraction)
-        state = self.request("fraction", split=second_pair["id"], fraction=1.25)
-        self.expect("split ratio clamps to its maximum", abs(state["splits"][-1]["fraction"] - 0.8) < 0.001)
-        state = self.request("fraction", split=second_pair["id"], fraction=-0.25)
-        self.expect("split ratio clamps to its minimum", abs(state["splits"][-1]["fraction"] - 0.2) < 0.001)
-        state = self.request("fraction", split=second_pair["id"], fraction=second_fraction)
-        self.request("save")
-        second_session = self.session(second)
-        second_file_pair = second_session["splits"][-1]
-        self.expect("each Space has a separate saved session", self.session_path(FIRST_SPACE) != self.session_path(second) and self.session_path(FIRST_SPACE).exists() and self.session_path(second).exists())
-        self.expect("split ratio and blank pane are persisted per Space", abs(second_file_pair["fraction"] - second_fraction) < 0.001 and any(entry["url"] == "about:blank" for entry in second_session["tabs"]))
-
-        state = self.request("space", spaceAction="go", spaceID=FIRST_SPACE)
-        self.expect("switching Spaces preserves the first Space's live pair", state["spaceID"] == FIRST_SPACE and bool(state["splits"]))
-        state = self.request("space", spaceAction="go", spaceID=second)
-        self.expect("switching back preserves the second Space's live pair", state["spaceID"] == second and any(abs(pair["fraction"] - second_fraction) < 0.001 for pair in state["splits"]))
-
-        self.stop()
-        damaged = self.session(second)
-        orphan = len(damaged["tabs"])
-        damaged["tabs"].append({"url": "about:blank", "title": ""})
-        damaged["splits"].append({"left": 999, "right": orphan, "fraction": 0.5})
-        self.session_path(second).write_text(json.dumps(damaged))
-        self.start()
-        state = self.state()
-        restored = next((pair for pair in state["splits"] if abs(pair["fraction"] - second_fraction) < 0.001), None)
-        self.expect("relaunch restores the current Space's split and ratio", state["spaceID"] == second and restored is not None)
-        self.expect("invalid saved split and orphan blank are discarded", len(state["splits"]) == 1 and
-                    sum(tab["blank"] for tab in state["tabs"]) == 1)
-        if restored:
-            right = self.tab(state, restored["right"])
-            self.expect("relaunch restores a blank right pane", right["blank"])
-
-        state = self.request("space", spaceAction="go", spaceID=FIRST_SPACE)
-        self.expect("relaunch also restores the other Space's saved split", state["spaceID"] == FIRST_SPACE and bool(state["splits"]) and all(not tab["shy"] for tab in state["tabs"]))
-
-        # A folded group still exposes the left representative when focus is
-        # in the right pane; row navigation skips the other pane of the pair.
-        pair = state["splits"][0]
-        left, right = pair["left"], pair["right"]
-        state = self.request("group", id=left)
-        group_id = state["groups"][-1]["id"]
-        self.request("group", id=right, group=group_id)
-        state = self.request("pair", id=right, **{"with": left}, side="right")
-        state = self.request("focus", id=right)
-        state = self.request("collapse", group=group_id)
-        self.expect("collapsed group shows pair representative for focused right pane", left in state["shownIDs"] and right not in state["shownIDs"])
-        state = self.request("step", direction=-1)
-        self.expect("previous tab skips both panes of the pair", state["activeID"] not in (left, right))
-
-        # Moving one pane to another Space or window leaves the partner in a
-        # valid ordinary tab and never serializes a stale pair.
-        self.request("focus", id=right)
-        state = self.request("moveSpace", id=right, spaceID=second)
-        self.expect("moving a pane to another Space separates its pair", all(right not in (p["left"], p["right"]) for p in state["splits"]))
-        state = self.request("space", spaceAction="go", spaceID=second)
-        self.expect("moved pane arrives in target Space", right in {t["id"] for t in state["tabs"]})
-        other = next(t["id"] for t in state["tabs"] if "space-two" in t["url"])
-        state = self.request("pair", id=right, **{"with": other}, side="left")
-        self.expect("moved pane can form a new pair in target Space", any(right in (p["left"], p["right"]) for p in state["splits"]))
-        state = self.request("moveWindow", id=right)
-        self.expect("moving pane to new window separates pair and keeps partner", state["windows"] >= 2 and not state["splits"] and other in {t["id"] for t in state["tabs"]})
-        self.command({"do": "windows", "action": "new"})
-        blank_window = self.request("start", window=3)
-        blank_pair = blank_window["splits"][-1]
-        self.request("moveWindow", window=2, id=right, targetWindow=3)
-        received = self.request("state", window=3)
-        present = {t["id"] for t in received["tabs"]}
-        self.expect("receiving a tab preserves an empty target-window split", right in present and
-                    blank_pair["left"] in present and blank_pair["right"] in present and
-                    any(p["left"] == blank_pair["left"] and p["right"] == blank_pair["right"] for p in received["splits"]))
-        self.request("space", spaceAction="go", spaceID=FIRST_SPACE)
-        state = self.request("enabled", on=False)
-        self.expect("turning Split View off detaches every visible pair", not state["splits"] and not state["enabled"])
-        rows = self.request("rows")["rows"]
-        self.expect("turning Split View off clears parked and saved Space pairs", all(row["splits"] == 0 for row in rows.values()))
-
-        print(f"\n{self.passed} passed, {self.failed} failed; isolated world {self.world}")
-        print(f"log: {self.log_path}")
-        if self.failed:
-            raise SystemExit(1)
-
-    def interactive(self) -> None:
-        self.server_thread.start()
-        self.build()
-        self.start()
-        self.request("enabled", on=True)
-        initial = next((tab["id"] for tab in self.state()["tabs"] if tab["blank"]), None)
-        first = self.page("split-left")
-        second = self.page("split-right")
-        self.page("single-tab")
-        if initial:
-            self.request("close", id=initial)
-        self.request("pair", id=first, **{"with": second}, side="left")
-        self.request("select", id=first)
-        self.command({"do": "window"})
-        print(json.dumps({
-            "bundle": str(self.bundle), "bundleID": self.bundle_id,
-            "world": self.world, "fixture": f"http://127.0.0.1:{self.port}/",
-            "socket": str(self.socket_path), "log": str(self.log_path),
-            "state": self.state(),
-        }, indent=2), flush=True)
-        print("Isolated Split View app is open; stop this process to clean up.", flush=True)
-        while self.process and self.process.poll() is None:
-            time.sleep(0.5)
-
-    def close(self) -> None:
-        self.stop()
-        self.server.shutdown()
-        self.server.server_close()
-        # Nothing of the test world left behind: its folder, its settings,
-        # and the test app, unregistered from Launch Services first.
-        shutil.rmtree(self.support, ignore_errors=True)
-        subprocess.run(["/usr/bin/defaults", "delete", self.suite], capture_output=True)
-        (Path.home() / "Library" / "Preferences" / f"{self.suite}.plist").unlink(missing_ok=True)
-        if self.bundle.exists():
-            lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-            subprocess.run([lsregister, "-u", str(self.bundle)], capture_output=True)
-            shutil.rmtree(self.bundle, ignore_errors=True)
-
-
-def main() -> int:
-    runner = Runner(shown="--interactive" in sys.argv[1:])
-    try:
-        if "--interactive" in sys.argv[1:]:
-            runner.interactive()
-        else:
-            runner.run()
-    except KeyboardInterrupt:
-        print("interrupted", file=sys.stderr)
-        return 130
-    except Exception as error:
-        print(f"ERROR: {error}", file=sys.stderr)
-        print(f"log: {runner.log_path}", file=sys.stderr)
-        return 1
-    finally:
-        runner.close()
-    return 0
+            case(t)
+        except Exception as error:
+            t.ok(f"{case.__name__} ran to the end", False, error)
+        finally:
+            finish()
+    t.done()
+    sys.exit(1 if t.failed else 0)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

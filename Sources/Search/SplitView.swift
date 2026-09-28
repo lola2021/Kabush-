@@ -10,6 +10,8 @@ struct SplitStage: View {
     @ObservedObject private var drag = TabDrag.shared
     /// Where each page on screen is, as the stage last said.
     @State private var frames: [Tab.ID: CGRect] = [:]
+    /// The page under the pointer, with two up.
+    @State private var hovered: Tab.ID?
 
     var body: some View {
         let split = browser.activeSplit
@@ -28,11 +30,13 @@ struct SplitStage: View {
                     case .separate: if let tab = browser.active { browser.detachSplit(tab) }
                     case .closeBoth: browser.closeSplit()
                     }
-                }
+                },
+                hover: { hovered = $0 }
             )
             ForEach(shown) { tab in
                 if let frame = frames[tab.id] {
-                    PaneLayers(browser: browser, tab: tab, paired: shown.count > 1, width: frame.width)
+                    PaneLayers(browser: browser, tab: tab, paired: shown.count > 1, width: frame.width,
+                               hovered: hovered == tab.id)
                         .frame(width: frame.width, height: frame.height)
                         .offset(x: frame.minX, y: frame.minY)
                 }
@@ -56,8 +60,29 @@ private struct PaneLayers: View {
     @ObservedObject var tab: Tab
     let paired: Bool
     let width: CGFloat
+    var hovered = false
 
     private var focused: Bool { browser.activeID == tab.id }
+
+    /// Whose page the other one is, said on the page itself: under the
+    /// pointer, or all the time while the tabs are folded away and nothing
+    /// else on screen says so.
+    @ViewBuilder
+    private var whose: some View {
+        if paired, !focused, hovered || browser.folded, let host = tab.address?.host(), !tab.isBlank {
+            Text(host.hasPrefix("www.") ? String(host.dropFirst(4)) : host)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.muted)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 22)
+                .background(Palette.ground, in: Capsule())
+                .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
+                .padding(10)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -110,6 +135,8 @@ private struct PaneLayers: View {
                     .transition(.opacity)
             }
         }
+        .overlay(alignment: .topTrailing) { whose }
+        .animation(Motion.quick, value: hovered)
         .background { SplitDropZone(browser: browser, tab: tab, kind: .stage) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(tab.label.isEmpty ? "New Tab" : tab.label)
@@ -127,11 +154,15 @@ private struct SplitDropPreview: View {
     let tabs: [Tab]
 
     private var target: Tab? { tabs.first { $0.id == preview.targetID } }
+    private var carried: String {
+        let label = tabs.first { $0.id == preview.sourceID }?.label ?? ""
+        return label.isEmpty ? "New Tab" : label
+    }
 
     var body: some View {
         HStack(spacing: 2) {
-            half(title: preview.side == .left ? "Tab" : target?.label ?? "Page", proposed: preview.side == .left)
-            half(title: preview.side == .right ? "Tab" : target?.label ?? "Page", proposed: preview.side == .right)
+            half(title: preview.side == .left ? carried : target?.label ?? "Page", proposed: preview.side == .left)
+            half(title: preview.side == .right ? carried : target?.label ?? "Page", proposed: preview.side == .right)
         }
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

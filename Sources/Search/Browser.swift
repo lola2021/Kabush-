@@ -3242,6 +3242,13 @@ final class Browser: NSObject, ObservableObject {
 
     func prepare(_ tab: Tab) {
         tab.delegate = self
+        // With two pages up, the keys going to the other one — Tab walked
+        // past the last field of this one — make it the focused page, so the
+        // outline, ⌘L and the site card follow what is being typed into.
+        tab.onKeys = { [weak self] tab in
+            guard let self, let pair = activeSplit, pair.contains(tab.id), activeID != tab.id else { return }
+            focusPane(tab)
+        }
         tab.onLink = { [weak self] tab, address in
             guard let self, prefs.showsLinks, visibleTabIDs.contains(tab.id) else { return }
             linkStatus.show(address, over: tab.built)

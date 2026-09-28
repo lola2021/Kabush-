@@ -209,6 +209,13 @@ private struct SplitTabHalf: View {
                         .font(.system(size: 9))
                         .foregroundStyle(Palette.muted)
                 }
+                // The page is asking something, over its half of the stage.
+                if browser.paneQuestions.contains(where: { $0.tab == tab.id }) {
+                    Circle()
+                        .fill(Palette.muted)
+                        .frame(width: 5, height: 5)
+                        .accessibilityLabel("Asking a question")
+                }
                 if !narrow {
                     Text(title)
                         .font(.system(size: stacked ? 12.5 : 12))
