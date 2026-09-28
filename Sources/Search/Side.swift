@@ -398,14 +398,17 @@ struct SideBar: View {
             }
             // See the grid: the drag is measured in the column's space, not
             // the row's, so a row that has just moved keeps its bearings.
-            ForEach(Array(looseTabs.enumerated()), id: \.element.id) { index, tab in
+            // Worked out once, not by every row: each look walks the whole
+            // row, and 300 rows asking made redrawing the column quadratic.
+            let loose = looseTabs
+            ForEach(Array(loose.enumerated()), id: \.element.id) { index, tab in
                 let step = SideBar.row + SideBar.gap
                 rowItem(tab, tabs: browser.tabs, splits: browser.splits,
                         activeID: browser.activeID, interactive: true, pill: pill,
                         close: { browser.close(tab) })
                 // Positions here are among the loose rows; the pinned block
                 // sits in front of them in the real list.
-                .modifier(Carried(index: index, count: looseTabs.count, step: step, vertical: true,
+                .modifier(Carried(index: index, count: loose.count, step: step, vertical: true,
                                   space: "rows", onDropTab: { source, point in drop(source, at: point) },
                                   outside: { browser.dragOut(tab) }, browser: browser, tab: tab) {
                     if prefs.usesTabGroups {

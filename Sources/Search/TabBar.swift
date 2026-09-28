@@ -67,12 +67,18 @@ struct TabBar: View {
                         } else {
                             ScrollViewReader { reader in
                                 ScrollView(.horizontal, showsIndicators: false) {
+                                    // Every tab's width, worked out once for the run
+                                    // rather than by every tab: each working-out walks
+                                    // the whole row, group by group, and with 300 tabs
+                                    // asking one after another a redraw of the strip
+                                    // took over a second.
+                                    let each = width(in: geo.size.width)
                                     HStack(spacing: Metrics.tabGap) {
                                         if browser.prefs.usesTabGroups {
                                             let pins = browser.displayedTabs.filter { $0.pin != nil }
                                             ForEach(Array(pins.enumerated()), id: \.element.id) { index, tab in
                                                 topTab(tab, index: index, count: pins.count,
-                                                       group: nil, strip: geo.size.width)
+                                                       group: nil, strip: geo.size.width, each: each)
                                             }
                                             ForEach(browser.tabGroups) { group in
                                                 GroupHeading(browser: browser, group: group,
@@ -80,18 +86,18 @@ struct TabBar: View {
                                                 let members = browser.visibleTabs(in: group)
                                                 ForEach(Array(members.enumerated()), id: \.element.id) { index, tab in
                                                     topTab(tab, index: index, count: members.count,
-                                                           group: group.id, strip: geo.size.width)
+                                                           group: group.id, strip: geo.size.width, each: each)
                                                 }
                                             }
                                             let ungrouped = browser.displayedTabs.filter { $0.pin == nil && browser.group(of: $0) == nil }
                                             ForEach(Array(ungrouped.enumerated()), id: \.element.id) { index, tab in
                                                 topTab(tab, index: index, count: ungrouped.count,
-                                                       group: nil, strip: geo.size.width)
+                                                       group: nil, strip: geo.size.width, each: each)
                                             }
                                         } else {
                                             ForEach(Array(browser.displayedTabs.enumerated()), id: \.element.id) { index, tab in
                                                 topTab(tab, index: index, count: browser.displayedTabs.count,
-                                                       group: nil, strip: geo.size.width)
+                                                       group: nil, strip: geo.size.width, each: each)
                                             }
                                         }
                                     }
@@ -254,13 +260,15 @@ struct TabBar: View {
         }
     }
 
-    private func topTab(_ tab: Tab, index: Int, count: Int, group: UUID?, strip: CGFloat) -> some View {
+    /// `each`: every loose tab's width (see `width(in:)`), worked out once
+    /// for the run.
+    private func topTab(_ tab: Tab, index: Int, count: Int, group: UUID?, strip: CGFloat, each: CGFloat) -> some View {
         let pair = browser.prefs.splitView ? browser.split(for: tab) : nil
         let isPairRepresentative = pair?.left == tab.id
-        let itemWidth = isPairRepresentative ? splitItemWidth(base: width(in: strip)) : width(in: strip)
+        let itemWidth = isPairRepresentative ? splitItemWidth(base: each) : each
         let step = (tab.pin != nil ? Metrics.pinWidth : itemWidth) + Metrics.tabGap
         return rowItem(tab, in: browser.tabs, splits: browser.splits, activeID: browser.activeID,
-                       width: width(in: strip), room: strip - lights - leading - 12,
+                       width: each, room: strip - lights - leading - 12,
                        height: Metrics.strip, interactive: true, pill: pill)
             .background {
                 if browser.prefs.splitView && !isPairRepresentative {
