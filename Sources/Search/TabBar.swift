@@ -851,6 +851,16 @@ struct TabAddressField: NSViewRepresentable {
         coordinator.unwatch()
     }
 
+    /// The width it is offered, never the address's own. Left to its own,
+    /// the field was as wide as the whole address and the row cut it off:
+    /// a field that never runs out of room never scrolls, so the caret went
+    /// on out of sight with ← and →, and so did what was typed at the end.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView field: NSTextField, context: Context) -> CGSize? {
+        let natural = field.intrinsicContentSize
+        guard let width = proposal.width, width.isFinite else { return nil }
+        return CGSize(width: max(0, width), height: proposal.height ?? natural.height)
+    }
+
     func updateNSView(_ field: NSTextField, context: Context) {
         let coordinator = context.coordinator
         coordinator.browser = browser
