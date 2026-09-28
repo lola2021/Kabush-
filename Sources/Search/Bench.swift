@@ -891,6 +891,43 @@ final class Bench {
                 next(0)
             }
 
+        case "sitesearch":
+            // Search a site from the address field (SiteSearch.swift): what
+            // it offers and holds, Tab, ⌫ in an empty field, Esc, Return,
+            // and the sites it has learned. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "sitesearch only works on a --test run"]); return }
+            func state(_ extra: [String: Any] = [:]) -> [String: Any] {
+                var out: [String: Any] = [
+                    "offer": browser.siteOffer?.name ?? "", "chip": browser.siteChip?.name ?? "",
+                    "typed": browser.typed, "offers": browser.offers.map { [$0.key, $0.url.absoluteString] },
+                    "editing": browser.editing, "learned": SiteSearch.learned.map { [$0.name, $0.host, $0.template] },
+                    "address": browser.active?.address?.absoluteString ?? "",
+                ]
+                out.merge(extra) { _, new in new }
+                return out
+            }
+            switch request["action"] as? String ?? "state" {
+            case "tab": answer(state(["took": browser.lockSiteOffer()]))
+            case "delete":
+                guard let field = Bench.addressField(in: (browser.window ?? Links.window)?.contentView),
+                      let editor = field.currentEditor() as? NSTextView else { answer(["error": "no field editor"]); return }
+                editor.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+                answer(state())
+            case "esc": browser.dismiss(); answer(state())
+            case "go":
+                browser.submit()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(state(["pending": browser.active?.pending?.absoluteString ?? ""])) }
+            case "learn":
+                guard let page = (request["page"] as? String).flatMap(URL.init(string:)),
+                      let description = (request["description"] as? String).flatMap(URL.init(string:)) else {
+                    answer(["error": "sitesearch learn needs page and description"]); return
+                }
+                SiteSearch.learn(from: page, description: description)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { answer(state()) }
+            case "forget": SiteSearch.forget(); answer(state())
+            default: answer(state())
+            }
+
         case "bookmark":
             // A bookmark picked from the button's list, through the same
             // call the list makes: how long until WebKit is loading it, and

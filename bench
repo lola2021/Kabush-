@@ -44,6 +44,8 @@
                                        world's own account — whether it is there, before and after
     ./bench fold PATH [WIDTH]          test run: the folded strip or column out over the page (ui folded on,
                                        ui peek on), drawn off screen over red — red shows where the page would
+    ./bench sitesearch [state|tab|delete|esc|go|learn PAGE DESCRIPTION|forget]
+                                       test run only: search a site from the address field
     ./bench split state|start|pair|focus|select|detach|fraction|close|new-tab|move|drop|open|private|bench|sleep|reopen|insert|save|space|mouse
                                        test run only: exercise split state in the real browser model
     ./bench space [new NAME [fresh]|go N|delete|swipe DX|hold DX|release|move N]
@@ -204,6 +206,10 @@ def main(argv):
         request["id"] = args[0]
         if len(args) > 1: request["path"] = os.path.abspath(args[1])
         if len(args) > 2: request["width"] = float(args[2])
+    elif verb == "sitesearch":
+        request["action"] = args[0] if args else "state"
+        if len(args) == 3 and args[0] == "learn":
+            request["page"], request["description"] = args[1], args[2]
     elif verb == "ui":
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args

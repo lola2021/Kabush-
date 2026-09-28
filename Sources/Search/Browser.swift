@@ -247,6 +247,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func destination(for typed: String) -> URL? {
+        if let site = siteChip { return site.url(for: typed) }
         if let url = Address.url(from: typed) { return url }
         if let (keyword, rest) = Keyword.match(typed, in: prefs.keywords),
            let url = Engine.url(for: rest, template: keyword.template) {
@@ -262,7 +263,17 @@ final class Browser: NSObject, ObservableObject {
 
     /// The address field, raised over a page by ⌘L. A blank tab shows it
     /// without being asked — there is nothing else for that tab to show.
-    @Published var editing = false
+    @Published var editing = false {
+        // The field put away takes its chip with it.
+        didSet { if !editing, siteChip != nil { siteChip = nil } }
+    }
+    /// The site the list offers to search, for what has been typed so far
+    /// (Settings › General › Search a site from the address field).
+    @Published private(set) var siteOffer: SearchSite?
+    /// The site Tab put in the field: what is typed next searches it.
+    @Published var siteChip: SearchSite? {
+        didSet { if siteChip != oldValue { guess() } }
+    }
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
     /// answers to this string.
@@ -953,8 +964,10 @@ final class Browser: NSObject, ObservableObject {
 
     func clearHistory() {
         history.forget()
-        // The sites' icons are a list of where you have been, too.
+        // The sites' icons are a list of where you have been, too, and so
+        // are the searches learned from sites visited (SiteSearch.swift).
         Favicons.shared.forgetAll()
+        SiteSearch.forget()
         announce("History cleared")
     }
 
@@ -3404,12 +3417,28 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
+        // A site in the field: only its search, for what is typed after it.
+        if let site = siteChip {
+            siteOffer = nil
+            ending = nil
+            picked = nil
+            let words = typed.trimmingCharacters(in: .whitespaces)
+            offers = words.isEmpty ? [] : site.url(for: words).map {
+                [Suggestion(key: words, title: site.name, url: $0, kind: .search)]
+            } ?? []
+            return
+        }
+
         guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
             offers = []
             ending = nil
             picked = nil
+            siteOffer = nil
             return
         }
+        // "red": Reddit's search, a Tab away.
+        let site = prefs.searchesSites && !summoning ? SiteSearch.match(typed) : nil
+        if siteOffer != site { siteOffer = site }
 
         // Three places and, if it can't be a place, a search. No open pages:
         // ⌘K exists for those, and mixing them in here made the list long
@@ -3491,6 +3520,16 @@ final class Browser: NSObject, ObservableObject {
     /// field impossible to shorten.
     func stopCompleting() { ending = nil }
 
+    /// Tab with a site offered: the site goes into the field as a chip, and
+    /// what was typed to name it is let go. True when it did.
+    func lockSiteOffer() -> Bool {
+        guard prefs.searchesSites, siteChip == nil, let site = siteOffer else { return false }
+        siteOffer = nil
+        typed = ""
+        siteChip = site
+        return true
+    }
+
     /// Tab, or the right arrow at the end of the line: take what is offered.
     func acceptEnding() {
         guard let ending, !ending.isEmpty else { return }
@@ -3531,6 +3570,11 @@ final class Browser: NSObject, ObservableObject {
     func dismiss() {
         summoning = false
         cycling = false
+        // Esc with a site in the field: the site goes, the field stays.
+        if siteChip != nil {
+            siteChip = nil
+            return
+        }
         // Esc on the empty page of a pair: the page isn't wanted after all.
         if let tab = active, tab.isBlank, split(for: tab) != nil {
             editing = false
@@ -4322,6 +4366,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         Favicons.shared.fetch(for: tab)
         guard !tab.shy, !tab.bench else { return }
         history.record(url, title: tab.title)
+        // A site's home page that says where its search is (OpenSearch):
+        // with Search a site on, it joins the list (see SiteSearch.learn).
+        if prefs.searchesSites, url.scheme == "https", url.path.isEmpty || url.path == "/" {
+            webView.evaluateInSearch(SiteSearch.lookup) { value in
+                guard let text = value as? String, let description = URL(string: text) else { return }
+                MainActor.assumeIsolated { SiteSearch.learn(from: url, description: description) }
+            }
+        }
     }
 
     private func fail(_ webView: WKWebView, _ error: Error) {

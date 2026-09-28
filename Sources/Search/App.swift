@@ -1227,6 +1227,8 @@ struct ContentView: View {
                 return true
             }
             if browser.editingTab != nil { return true }
+            // "red" then Tab: Reddit, in the field (SiteSearch.swift).
+            if browser.fieldShowing, !flags.contains(.shift), browser.lockSiteOffer() { return true }
             if browser.fieldShowing, !browser.offers.isEmpty {
                 browser.walk(flags.contains(.shift) ? -1 : 1)
                 return true

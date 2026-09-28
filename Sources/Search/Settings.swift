@@ -430,6 +430,10 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.lazyTabs)
             }
             Rule()
+            Line("Search a site from the address field", "Type the start of a site's name, like red or yout, then Tab, and what you type next searches that site. Sites you visit that offer a search join the list.") {
+                Switch(on: $prefs.searchesSites)
+            }
+            Rule()
             Line("Start with a fresh window", "Each time Search opens, your pinned tabs are there and last time's other tabs aren't.") {
                 Switch(on: $prefs.startsFresh)
             }

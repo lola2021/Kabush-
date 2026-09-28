@@ -36,6 +36,8 @@ enum WhatsNew {
                since: "1.0.5", get: { $0.ai }, set: { $0.ai = $1 }),
         Toggle(title: "Split View", detail: "Two tabs side by side: drag a tab to the edge of a page, or press ⌥⌘N.",
                since: "1.0.5", get: { $0.splitView }, set: { $0.splitView = $1 }),
+        Toggle(title: "Search a site from the address field", detail: "The start of a site's name, then Tab: red, Tab, and your words search Reddit.",
+               since: "1.0.5", get: { $0.searchesSites }, set: { $0.searchesSites = $1 }),
         Toggle(title: "Start with a fresh window", detail: "Your pinned tabs, and none of last time's others.",
                since: "1.0.5", get: { $0.startsFresh }, set: { $0.startsFresh = $1 }),
 

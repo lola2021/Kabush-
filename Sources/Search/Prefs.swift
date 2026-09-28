@@ -121,6 +121,11 @@ final class Preferences: ObservableObject {
         didSet { store.set(startsFresh, forKey: Preferences.freshKey) }
     }
     nonisolated static let freshKey = "start.fresh"
+    /// Search a site from the address field: the start of its name, then
+    /// Tab (see SiteSearch.swift). Off unless asked for.
+    @Published var searchesSites: Bool {
+        didSet { store.set(searchesSites, forKey: "search.sites") }
+    }
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
     }
@@ -370,6 +375,7 @@ final class Preferences: ObservableObject {
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         lazyTabs = store.bool(forKey: "tabs.lazy")
         startsFresh = store.bool(forKey: Preferences.freshKey)
+        searchesSites = store.bool(forKey: "search.sites")
         siteNotifications = store.object(forKey: "notifications.ask") as? Bool ?? true
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
