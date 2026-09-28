@@ -263,8 +263,20 @@ private func testCredentialsNeverReachTheFile() {
     do { try JSONEncoder().encode(legacy).write(to: Store.file("history.json")) } catch { fatalError("\(error)") }
     let loaded = History()
     Checks.expect(traces(loaded, host: "oldcred.example.test").first?.count == 4, "a legacy page kept with credentials should survive loading")
-    loaded.record(url("https://elsewhere.example.test/"), title: "Save")
-    Checks.expect(!savedFile().contains("secret"), "a password kept by an older version should leave history.json on the next save")
+    // Written again at once, with nothing else visited.
+    Checks.expect(!savedFile().contains("secret"), "a password kept by an older version should leave history.json as soon as it is loaded")
+
+    Store.use("huge-counts")
+    let huge = [
+        LegacyVisit(url: "https://big.example.test/", key: "big.example.test", title: "Big", count: Int.max, last: Date()),
+        LegacyVisit(url: "https://big.example.test/#again", key: "big.example.test", title: "Big", count: Int.max, last: Date()),
+        LegacyVisit(url: "https://neg.example.test/", key: "neg.example.test", title: "Neg", count: -5, last: Date()),
+    ]
+    do { try JSONEncoder().encode(huge).write(to: Store.file("history.json")) } catch { fatalError("\(error)") }
+    let big = History()
+    big.record(url("https://big.example.test/"), title: "Big")
+    Checks.expect(traces(big, host: "big.example.test").first?.count == History.mostVisits, "counts from a hand-edited file are held, added to without overflowing")
+    Checks.expect(traces(big, host: "neg.example.test").first?.count == 0, "a negative count from a hand-edited file becomes none")
 }
 
 @MainActor

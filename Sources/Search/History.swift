@@ -73,6 +73,8 @@ final class History: ObservableObject {
     /// it each time cost more than everything else a key press does.
     private var recentCache: [Trace]?
     private var saving = false
+    /// Visits counted at most: far more than anyone makes, and room to add.
+    static let mostVisits = 1_000_000_000
     /// These are derived once when a visit enters memory. Suggestions run on
     /// every keystroke, so neither URL parsing nor address formatting belongs
     /// in that loop.
@@ -182,14 +184,14 @@ final class History: ObservableObject {
             var home = visits[root] ?? Visit(
                 url: homeURL.absoluteString, key: root, title: "", count: 0, last: Date()
             )
-            home.count += 1
+            home.count = min(History.mostVisits, home.count + 1)
             home.last = Date()
             visits[root] = home
             remember(home, url: homeURL)
         }
 
         if var seen = visits[key] {
-            seen.count += 1
+            seen.count = min(History.mostVisits, seen.count + 1)
             seen.last = Date()
             seen.url = url.absoluteString
             if !title.isEmpty { seen.title = title }
@@ -217,12 +219,12 @@ final class History: ObservableObject {
         if var seen = visits[key] {
             // The larger of the two, not their sum: the same browser brought
             // in again must not count every visit twice.
-            seen.count = max(seen.count, count)
+            seen.count = min(History.mostVisits, max(seen.count, count))
             if last > seen.last { seen.last = last }
             if seen.title.isEmpty { seen.title = title }
             visits[key] = seen
         } else {
-            let visit = Visit(url: url.absoluteString, key: key, title: title, count: count, last: last)
+            let visit = Visit(url: url.absoluteString, key: key, title: title, count: min(max(count, 0), History.mostVisits), last: last)
             visits[key] = visit
             remember(visit, url: url)
         }
@@ -461,12 +463,19 @@ final class History: ObservableObject {
         }
         // Keys written by an older Search can meet under the new rule:
         // they are merged, never trusted to be unique.
+        var cleaned = false
         var loaded = Dictionary(list.map { saved in
             var visit = saved
+            // A count from a file edited by hand is held to a sane range,
+            // so adding to it can't overflow.
+            visit.count = min(max(visit.count, 0), History.mostVisits)
             if let url = URL(string: visit.url) {
                 // An address kept with a name and password in it, by a Search
                 // from before they were taken off, loses them here.
-                if let clean = History.kept(url) { visit.url = clean.absoluteString }
+                if let clean = History.kept(url), clean.absoluteString != visit.url {
+                    visit.url = clean.absoluteString
+                    cleaned = true
+                }
                 visit.key = History.identity(for: url)
             }
             return (visit.key, visit)
@@ -474,13 +483,15 @@ final class History: ObservableObject {
         History.rehomeCredits(&loaded)
         visits = loaded
         for visit in visits.values { remember(visit) }
+        // And written without them now, not at the next visit (Security).
+        if cleaned { save() }
     }
 
     /// The same page twice: its visits added up, the latest date, and a
     /// title if either had one.
     private static func merged(_ a: Visit, _ b: Visit) -> Visit {
         var kept = a.last >= b.last ? a : b
-        kept.count = a.count + b.count
+        kept.count = min(History.mostVisits, a.count.addingReportingOverflow(b.count).overflow ? History.mostVisits : a.count + b.count)
         if kept.title.isEmpty { kept.title = a.last >= b.last ? b.title : a.title }
         return kept
     }
