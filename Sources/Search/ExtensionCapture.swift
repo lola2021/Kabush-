@@ -308,10 +308,11 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
 
     /// WebKit's pretend camera, microphone and screen, so a test run records
     /// with no hardware and no macOS question. Never outside a test run.
-    static func mockDevices(_ preferences: WKPreferences) {
+    nonisolated static func mockDevices(_ preferences: WKPreferences) {
         guard Store.testing else { return }
-        for (name, on) in [("_setMockCaptureDevicesEnabled:", true), ("_setMockCaptureDevicesPromptEnabled:", false),
-                           ("_setGetUserMediaRequiresFocus:", false)] {
+        // WebKit's own pretend prompt stays: turned off, it grants without
+        // asking Search at all, and the question is what is being tested.
+        for (name, on) in [("_setMockCaptureDevicesEnabled:", true), ("_setGetUserMediaRequiresFocus:", false)] {
             let selector = NSSelectorFromString(name)
             guard preferences.responds(to: selector), let method = class_getMethodImplementation(type(of: preferences), selector) else { continue }
             typealias Set = @convention(c) (AnyObject, Selector, Bool) -> Void
