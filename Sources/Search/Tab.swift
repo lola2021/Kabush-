@@ -611,6 +611,7 @@ final class Tab: ObservableObject, Identifiable {
         Web.inspector(web.configuration.preferences)
         web.navigationDelegate = delegate
         web.uiDelegate = uiDelegate(delegate)
+        if #available(macOS 15.4, *) { ExtensionCapture.shared.watchScreen(web) }
         if !shy { PageNotifications.provide(web) }
 
         // Each name is cleared before being claimed — registering one twice is

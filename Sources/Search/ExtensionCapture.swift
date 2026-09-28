@@ -68,11 +68,15 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     private var refused: Set<String> = []
 
     /// Yes from you: now, or before and you have just used this extension —
-    /// its button, its popup, one of its pages. Otherwise it is asked again:
-    /// a remembered yes never lets an extension take the screen on its own.
+    /// its button or its line in the menu within the last minute (Loom's
+    /// Start is in its menu over the page, which isn't one of its own), its
+    /// popup or its pages within the last few seconds. Otherwise it is asked
+    /// again: a remembered yes never lets an extension take the screen on
+    /// its own.
     private func consent(_ context: WKWebExtensionContext) async -> Bool {
         let id = context.uniqueIdentifier
-        if ExtensionCapture.allowed(id), Extensions.justUsed(id) { return true }
+        let pressed = Extensions.pressed[id].map { Date().timeIntervalSince($0) < 60 } ?? false
+        if ExtensionCapture.allowed(id), pressed || Extensions.justUsed(id) { return true }
         // Refused once, not asked again until Search starts afresh: an
         // extension can't wear you down with the question.
         guard !refused.contains(id) else { return false }
@@ -293,11 +297,22 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
 
     /// Pages of extensions that asked to capture, watched for as long as they
     /// last — whatever the extension's own code does, the pill says it.
-    private final class Watched {
+    @MainActor private final class Watched {
         weak var web: WKWebView?
-        let id: String
+        /// The extension that asked; nil for a tab watched only for sharing
+        /// its screen, which the pill names by its site.
+        var extensionID: String?
         var capturing = false
-        init(_ web: WKWebView, _ id: String) { self.web = web; self.id = id }
+        init(_ web: WKWebView, _ id: String?) { self.web = web; self.extensionID = id }
+
+        var id: String { extensionID ?? "site:" + (web?.url?.host() ?? "") }
+
+        /// What counts: everything an extension captures; for a site, only
+        /// its screen — its camera and microphone have their own marks.
+        var live: Bool {
+            guard let web else { return false }
+            return extensionID == nil ? ExtensionCapture.screen(web) : ExtensionCapture.capturing(web)
+        }
     }
     private var watched: [ObjectIdentifier: Watched] = [:]
     private static let keys = ["cameraCaptureState", "microphoneCaptureState", "_displayCaptureState"]
@@ -312,9 +327,23 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         watch(web, id: id)
     }
 
-    func watch(_ web: WKWebView, id: String) {
+    /// Every tab, a website's included: sharing its screen puts up the pill
+    /// too — a site doing it itself (Meet), or an extension's frame in it
+    /// (Loom's menu), which goes through the site's page. Nothing changes in
+    /// what WebKit asks a website.
+    func watchScreen(_ web: WKWebView) {
+        guard web.responds(to: NSSelectorFromString("_displayCaptureState")) else { return }
+        register(web, id: nil)
+    }
+
+    func watch(_ web: WKWebView, id: String) { register(web, id: id) }
+
+    private func register(_ web: WKWebView, id: String?) {
         let key = ObjectIdentifier(web)
-        guard watched[key]?.web == nil else { return changed() }
+        if let entry = watched[key], entry.web != nil {
+            if entry.extensionID == nil { entry.extensionID = id }
+            return changed()
+        }
         watched[key] = Watched(web, id)
         for path in ExtensionCapture.keys where path != "_displayCaptureState" || web.responds(to: NSSelectorFromString(path)) {
             web.addObserver(self, forKeyPath: path, options: [], context: nil)
@@ -331,11 +360,14 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     struct Recording: Equatable, Identifiable {
         let id: String
         let name: String
+        /// A website sharing its screen, rather than an extension.
+        let site: Bool
         let screen: Bool
         let camera: Bool
         let microphone: Bool
 
         var what: String {
+            if site { return "is sharing your screen" }
             if screen { return "is recording your screen" }
             if camera && microphone { return "is using your camera and microphone" }
             return camera ? "is using your camera" : "is using your microphone"
@@ -359,14 +391,16 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         for (key, entry) in watched {
             // A page gone: WebKit's views let their observers go with them.
             guard let web = entry.web else { watched[key] = nil; continue }
-            let now = ExtensionCapture.capturing(web)
+            let now = entry.live
             // Stopped: an offscreen page lent to the pill goes back.
             if entry.capturing, !now { giveBack(web) }
             entry.capturing = now
             guard now else { continue }
             let before = by[entry.id]
+            let site = entry.extensionID == nil
             by[entry.id] = Recording(
-                id: entry.id, name: Browser.extensionName(entry.id),
+                id: entry.id, name: site ? (web.url.map(SiteCard.site) ?? "A page") : Browser.extensionName(entry.id),
+                site: site,
                 screen: (before?.screen ?? false) || ExtensionCapture.screen(web),
                 camera: (before?.camera ?? false) || web.cameraCaptureState != .none,
                 microphone: (before?.microphone ?? false) || web.microphoneCaptureState != .none)
@@ -382,7 +416,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     /// The pages of an extension that are capturing now: for the mark on
     /// their tabs.
     func webViews(of id: String) -> [WKWebView] {
-        watched.values.filter { $0.id == id }.compactMap(\.web).filter(ExtensionCapture.capturing)
+        watched.values.filter { $0.id == id && $0.live }.compactMap(\.web)
     }
 
     private typealias SetDisplay = @convention(c) (AnyObject, Selector, Int, (@convention(block) () -> Void)?) -> Void
@@ -413,7 +447,8 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
          "recordings": recordings.map { ["id": $0.id, "what": $0.what] },
          "allowed": ExtensionCapture.allowedIDs,
          "pill": RecordingIndicator.shared.lines.map { "\($0.name) \($0.what)" },
-         "lent": lent.count, "lendings": lendings]
+         "lent": lent.count, "lendings": lendings,
+         "watching": watched.values.filter { $0.web != nil }.count]
     }
 
     // MARK: - test runs

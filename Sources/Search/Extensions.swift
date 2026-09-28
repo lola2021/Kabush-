@@ -1081,6 +1081,10 @@ final class Extensions: NSObject, ObservableObject {
     /// for, even once WebKit no longer sees the click (see
     /// ExtensionShims, "permissions.afterClick").
     static var clicked: [String: Date] = [:]
+    /// The same, kept: permissions.request uses up `clicked`, and a
+    /// recording started from the button counts it for a minute (see
+    /// ExtensionCapture).
+    static var pressed: [String: Date] = [:]
 
     /// When you last clicked or typed in one of each extension's own pages —
     /// its popup, or a page of its in a tab. Real events only: a page's
@@ -1117,6 +1121,7 @@ final class Extensions: NSObject, ObservableObject {
     func press(_ id: String) {
         guard let context = contexts[id], !ExtensionPopup.shared.closes(id) else { return }
         Extensions.clicked[id] = Date()
+        Extensions.pressed[id] = Date()
         if let tab = activeAdapter { context.userGesturePerformed(in: tab) }
         // An extension that asked for its button to open its side panel.
         if ExtensionShims.panelOnClick.contains(id), context.action(for: activeAdapter)?.presentsPopup != true {
