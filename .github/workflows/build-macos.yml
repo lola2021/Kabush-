@@ -28,6 +28,7 @@ jobs:
             -scheme Search \
             -configuration Debug \
             -derivedDataPath .build/derived \
+            -destination "platform=macOS" \
             -quiet \
             build
       
