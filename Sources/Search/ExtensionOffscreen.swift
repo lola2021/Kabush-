@@ -204,6 +204,24 @@ final class ExtensionOffscreen: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         }
     }
 
+    // The document itself stays on the extension's own pages, as Chrome
+    // keeps it: a site loaded in its place would run hidden, for as long as
+    // it liked, with the extension's configuration. Its frames may go
+    // anywhere; reading sites in them is what it is for. Nothing is saved
+    // from it: no one asked for a file from a page no one sees.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if navigationAction.shouldPerformDownload { return decisionHandler(.cancel) }
+        guard navigationAction.targetFrame?.isMainFrame != false else { return decisionHandler(.allow) }
+        let to = navigationAction.request.url
+        decisionHandler(to?.scheme == url.scheme && to?.host == url.host ? .allow : .cancel)
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        decisionHandler(navigationResponse.canShowMIMEType ? .allow : .cancel)
+    }
+
     // Only its first page failing ends it: once it is there, a later
     // navigation that fails or is called off leaves it where it was.
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
