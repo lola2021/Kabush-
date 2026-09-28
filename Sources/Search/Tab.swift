@@ -420,6 +420,8 @@ final class Tab: ObservableObject, Identifiable {
     /// next, so it is only set again on a view built new, as a sleeping tab
     /// wakes (see build()).
     @Published var muted = false
+    /// An extension is recording from this tab's page (see RecordingIndicator).
+    @Published var recording = false
 
     /// Not `web`: a tab asleep is muted without being woken, and hears of
     /// it when its page is built again.

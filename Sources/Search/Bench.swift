@@ -891,6 +891,54 @@ final class Bench {
                 next(0)
             }
 
+        case "recording":
+            // The recording pill (RecordingIndicator.swift): lines put up as
+            // ExtensionCapture would, a page lent to it, what it shows, and a
+            // picture of it drawn off every screen. A test run never puts
+            // the pill itself on a screen. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "recording only works on a --test run"]); return }
+            let pill = RecordingIndicator.shared
+            func state(_ extra: [String: Any] = [:]) -> [String: Any] {
+                var out: [String: Any] = [
+                    "lines": pill.lines.map { [$0.id, $0.name, $0.what] },
+                    "recordingTabs": browser.tabs.filter(\.recording).map { Bench.short($0) },
+                    "onScreen": NSApp.windows.contains { $0 is NSPanel && $0.isVisible && $0.contentView?.subviews.contains { $0 is NSHostingView<PillView> } == true },
+                ]
+                out.merge(extra) { _, new in new }
+                return out
+            }
+            switch request["action"] as? String ?? "state" {
+            case "show":
+                let names = request["names"] as? [String] ?? ["Loom"]
+                let what = request["what"] as? String ?? "is recording your screen"
+                let page = find(request, in: browser)?.built
+                pill.update(names.map { RecordingLine(id: $0.lowercased(), name: $0, what: what) }, pages: page.map { [$0] } ?? [])
+                answer(state())
+            case "stop":
+                var stopped = ""
+                pill.onStop = { stopped = $0 }
+                pill.stop(request["name"] as? String ?? "")
+                answer(state(["stopped": stopped]))
+            case "clear": pill.update([]); answer(state())
+            case "host", "release":
+                guard let tab = find(request, in: browser), let web = tab.built else { answer(missing(request)); return }
+                // Where the page was before it was lent, to check it comes back there.
+                if request["action"] as? String == "host" {
+                    Bench.lentFrom[ObjectIdentifier(web)] = web.superview.map { WeakView($0) } ?? WeakView(nil)
+                    pill.host(web)
+                } else {
+                    pill.release(web)
+                }
+                let home = Bench.lentFrom[ObjectIdentifier(web)]?.view
+                answer(state(["hosted": pill.hosts(web), "backHome": web.superview === home]))
+            case "picture":
+                guard let path = request["path"] as? String, let rep = pill.picture(dark: request["dark"] as? Bool == true),
+                      let data = rep.representation(using: .png, properties: [:]) else { answer(["error": "no picture"]); return }
+                try? data.write(to: URL(fileURLWithPath: path))
+                answer(state(["saved": path]))
+            default: answer(state())
+            }
+
         case "sitesearch":
             // Search a site from the address field (SiteSearch.swift): what
             // it offers and holds, Tab, ⌫ in an empty field, Esc, Return,
@@ -2246,6 +2294,13 @@ final class Bench {
     /// A small model bridge for offline split regressions. The browser model is
     /// the system under test; this command is deliberately unavailable in the
     /// browser somebody is using because its actions move and close tabs.
+    /// Where a page lent to the recording pill was before, for `recording`.
+    static var lentFrom: [ObjectIdentifier: WeakView] = [:]
+    final class WeakView {
+        weak var view: NSView?
+        init(_ view: NSView?) { self.view = view }
+    }
+
     /// The view a `split mouse … to: view` press landed on, for the rest of it.
     private weak var pressed: NSView?
 

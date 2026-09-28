@@ -610,6 +610,13 @@ private struct SideRow: View {
                         .font(.system(size: 9))
                         .foregroundStyle(colour.opacity(0.7))
                 }
+                if tab.recording {
+                    // An extension recording from this page (RecordingIndicator).
+                    Image(systemName: "record.circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(colour.opacity(0.8))
+                        .help("Recording")
+                }
                 Text(tab.label)
                     .font(.system(size: 12.5))
                     .lineLimit(1)
