@@ -22,21 +22,16 @@ jobs:
       - name: Resolve dependencies
         run: swift package resolve
       
-      - name: Build Search.app (Debug)
+      - name: Build Search.app using build.sh
         run: |
-          xcodebuild \
-            -scheme Search \
-            -configuration Debug \
-            -derivedDataPath .build/derived \
-            -destination "platform=macOS" \
-            -quiet \
-            build
+          ./build.sh debug app
       
-      - name: Locate .app
+      - name: Verify app bundle
         run: |
-          APP_PATH=$(find .build/derived -name "Search.app" -type d | head -1)
+          APP_PATH="build/Search.app"
           echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
           echo "Found: $APP_PATH"
+          ls -la "$APP_PATH"
       
       - name: Create unsigned DMG (for testing)
         if: env.APP_PATH != ''
