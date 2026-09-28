@@ -101,21 +101,29 @@ enum SiteCardPanel {
         panel.hasShadow = true
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = true
-        // Under the address, lined up with the tab's own edge.
+        // Under the address, lined up with the tab's own edge — or over it,
+        // for a tab too near the bottom of the screen to have the room. Only
+        // ever beside the field: pushed up onto it, the card covered the
+        // address being edited, and what was typed there with it.
         let spot = window.convertToScreen(field.convert(field.bounds, to: nil))
         var origin = NSPoint(x: spot.minX - 12, y: spot.minY - 12 - size.height)
+        var above = false
         if let screen = window.screen?.visibleFrame {
             origin.x = min(max(origin.x, screen.minX + 8), screen.maxX - size.width - 8)
-            origin.y = max(origin.y, screen.minY + 8)
+            if origin.y < screen.minY + 8 {
+                above = true
+                origin.y = min(spot.maxY + 12, screen.maxY - size.height - 8)
+            }
         }
         panel.setFrameOrigin(origin)
         window.addChildWindow(panel, ordered: .above)
-        // Its size follows the card, keeping the top edge under the address.
+        // Its size follows the card, keeping the edge nearest the address
+        // where it is.
         host.onResize = { [weak panel] fitted in
             guard let panel, fitted.width > 0, fitted.height > 0,
                   panel.frame.size != fitted else { return }
             var frame = panel.frame
-            frame.origin.y += frame.height - fitted.height
+            if !above { frame.origin.y += frame.height - fitted.height }
             frame.size = fitted
             panel.setFrame(frame, display: true)
         }
