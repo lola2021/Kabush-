@@ -194,19 +194,33 @@ extension Browser {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping ([URL]?) -> Void
     ) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = parameters.allowsDirectories
-        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
-        panel.resolvesAliases = true
-        let finish: (NSApplication.ModalResponse) -> Void = { answer in
-            completionHandler(answer == .OK ? panel.urls : nil)
+        // Over its own page only, as its other questions are (see ask): a
+        // page behind, or the other page of a pair, choosing a file would
+        // have it chosen under the page you are looking at. A test run never
+        // shows one — it would be a window on the screen of whoever is
+        // working beside it — and is answered as cancelled.
+        if Store.testing {
+            Dialogs.askedInTest.append("Choose a file (\(frame.securityOrigin.host))")
+            return completionHandler(nil)
         }
-        if let window = Dialogs.window(for: webView) {
-            panel.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            finish(panel.runModal())
-        }
+        ask(from: webView, show: {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = parameters.allowsDirectories
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.resolvesAliases = true
+            // The site the file goes to, named.
+            let host = frame.securityOrigin.host
+            panel.message = host.isEmpty ? "Choose a file for this page" : "Choose a file for \(host)"
+            let finish: (NSApplication.ModalResponse) -> Void = { answer in
+                completionHandler(answer == .OK ? panel.urls : nil)
+            }
+            if let window = Dialogs.window(for: webView) {
+                panel.beginSheetModal(for: window, completionHandler: finish)
+            } else {
+                finish(panel.runModal())
+            }
+        }, drop: { completionHandler(nil) })
     }
 
     // MARK: - a site that asks who you are, or can't prove who it is
