@@ -27,6 +27,10 @@ enum AIPage {
         let links: [String]
         /// Too long: the start and the end are kept.
         let cut: Bool
+        /// It has words addressed to an AI ("ignore previous instructions",
+        /// "System:"): the answer may have been steered, which the models
+        /// themselves never say, so the panel does.
+        var addressed = false
     }
 
     /// About 6,000 tokens: the start and the end of a longer page.
@@ -48,9 +52,27 @@ enum AIPage {
     }
 
     static func shaped(title: String, url: URL?, text: String, links: [String]) -> Read {
-        guard text.count > limit else { return Read(title: title, url: url, text: text, links: links, cut: false) }
-        let head = text.prefix(limit * 2 / 3), tail = text.suffix(limit / 3)
-        return Read(title: title, url: url, text: head + "\n\n[…]\n\n" + tail, links: links, cut: true)
+        var read: Read
+        if text.count > limit {
+            let head = text.prefix(limit * 2 / 3), tail = text.suffix(limit / 3)
+            read = Read(title: title, url: url, text: head + "\n\n[…]\n\n" + tail, links: links, cut: true)
+        } else {
+            read = Read(title: title, url: url, text: text, links: links, cut: false)
+        }
+        read.addressed = addressesAI(title + "\n" + text)
+        return read
+    }
+
+    /// Words a page writes for a model rather than for you.
+    static func addressesAI(_ text: String) -> Bool {
+        let patterns = [
+            #"(?i)\b(ignore|disregard|forget)\b.{0,20}\b(previous|prior|above|earlier|all)\b.{0,20}\b(instructions?|prompts?|rules)\b"#,
+            #"(?im)^\s*(system|assistant)\s*:"#,
+            #"(?i)<\|?(im_start|im_end|system)\|?>"#,
+            #"(?i)\b(you are|act as) (now )?(an? )?(ai|assistant|language model|llm|chatbot)\b"#,
+            #"(?i)\b(ai|assistant|model|llm)s?\b.{0,30}\b(must|should) (tell|say|add|include|output)\b"#,
+        ]
+        return patterns.contains { text.range(of: $0, options: .regularExpression) != nil }
     }
 
     // MARK: - the prompt
@@ -205,25 +227,61 @@ enum AIPage {
         return top;
       }
 
+      // What is around the words rather than part of them: navigation, the
+      // foot of the page, asides, and an encyclopedia's reference lists and
+      // boxes of links — which would take the place of the article's end.
+      var clutter = 'nav, footer, aside, [role="navigation"], [role="contentinfo"], [role="complementary"], ' +
+        '.reflist, .references, .mw-references-wrap, .refbegin, .navbox, .vertical-navbox, .catlinks, #references';
+
+      // Colours, for text written in the colour of what is behind it.
+      function rgb(value) {
+        var m = /^rgba?\\(([\\d.]+),\\s*([\\d.]+),\\s*([\\d.]+)(?:,\\s*([\\d.]+))?\\)/.exec(value || '');
+        return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null;
+      }
+      function light(c) {
+        function one(v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+        return 0.2126 * one(c.r) + 0.7152 * one(c.g) + 0.0722 * one(c.b);
+      }
+      function unreadable(color, behind) {
+        var c = rgb(color);
+        if (!c || !behind) return false;
+        if (c.a < 0.1) return true;
+        var a = light(c), b = light(behind);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 1.25;
+      }
+
       var out = [], links = [];
-      function walk(node) {
+      // `behind`: the colour behind this node, or null where a picture is
+      // (text over an image can't be judged by colours alone).
+      function walk(node, behind) {
         if (seen++ > limit) return;
         if (node.nodeType === 3) {
           var t = node.nodeValue.replace(/\\s+/g, ' ');
-          if (t.trim()) out.push(t);
+          if (t.trim() && !unreadable(getComputedStyle(node.parentElement).color, behind)) out.push(t);
           return;
         }
         if (node.nodeType !== 1 || skip[node.tagName.toUpperCase()]) return;
         if (node.tagName === 'BR') { out.push('\\n'); return; }
+        if (node !== root && node.matches && node.matches(clutter)) return;
         if (!shown(node)) return;
-        var block = !/^inline/.test(getComputedStyle(node).display);
+        var s = getComputedStyle(node);
+        if (s.backgroundImage && s.backgroundImage !== 'none') behind = null;
+        else { var bg = rgb(s.backgroundColor); if (bg && bg.a > 0.5 && behind !== null) behind = bg; }
+        var block = !/^inline/.test(s.display);
         if (block) out.push('\\n');
-        for (var c = node.firstChild; c; c = c.nextSibling) walk(c);
+        for (var c = node.firstChild; c; c = c.nextSibling) walk(c, behind);
         if (block) out.push('\\n');
       }
 
       var root = article() || document.body;
       if (!root) return null;
+      // The colour behind the article: its own, or the first of its
+      // parents' that is painted, or white as a page is.
+      var ground = { r: 255, g: 255, b: 255, a: 1 };
+      for (var up = root; up && up.nodeType === 1; up = up.parentElement) {
+        var painted = rgb(getComputedStyle(up).backgroundColor);
+        if (painted && painted.a > 0.5) { ground = painted; break; }
+      }
       // Every visible link on the page, the article's or not, for the check
       // on the answer: an address the page shows you is on the page.
       for (var l = 0; l < document.links.length && links.length < 400; l++) {
@@ -234,7 +292,7 @@ enum AIPage {
         if (visible) links.push(a.href);
       }
       var heading = document.querySelector('h1');
-      walk(root);
+      walk(root, ground);
       var text = out.join('').replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
       return { title: document.title || (heading && heading.textContent.trim()) || '', text: text, links: links };
     })();

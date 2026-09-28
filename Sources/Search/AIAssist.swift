@@ -39,6 +39,8 @@ final class Assistant: ObservableObject, Identifiable {
     /// What a provider off this Mac is sent, not yet agreed to.
     @Published private(set) var notice: String?
     @Published private(set) var trouble: String?
+    /// The page has words addressed to an AI (see AIPage.addressesAI).
+    @Published private(set) var addressed = false
 
     private var read: AIPage.Read?
     private let fence = AIPage.newFence()
@@ -54,6 +56,7 @@ final class Assistant: ObservableObject, Identifiable {
         Task { @MainActor [weak self, weak tab] in
             guard let self, let tab else { return }
             self.read = await AIPage.read(tab)
+            self.addressed = self.read?.addressed ?? false
             self.reading = false
             guard self.read != nil else {
                 self.trouble = "There's nothing on this page to read."
@@ -275,6 +278,9 @@ struct AssistantPanel: View {
             } else if assistant.reading {
                 Text("Reading the page…").font(.system(size: 12.5)).foregroundStyle(Palette.muted)
             }
+            if assistant.addressed, assistant.notice == nil {
+                caution("This page has text written for an AI to follow. The answer may have been steered by it.")
+            }
             ForEach(assistant.turns) { turn in
                 TurnView(turn: turn).id(turn.id)
             }
@@ -282,24 +288,22 @@ struct AssistantPanel: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private func caution(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle").font(.system(size: 10, weight: .medium))
+            Text(verbatim: text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(Palette.muted)
+        .padding(8)
+        .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private var scrolling: some View {
             ScrollViewReader { scroller in
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        if let notice = assistant.notice {
-                            noticeCard(notice)
-                        } else if let trouble = assistant.trouble {
-                            Text(trouble).font(.system(size: 12.5)).foregroundStyle(Palette.muted)
-                        } else if assistant.reading {
-                            Text("Reading the page…").font(.system(size: 12.5)).foregroundStyle(Palette.muted)
-                        }
-                        ForEach(assistant.turns) { turn in
-                            TurnView(turn: turn).id(turn.id)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    conversation
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
                 }
                 .onChange(of: assistant.turns.last?.answer) { _, _ in
                     if let last = assistant.turns.last { scroller.scrollTo(last.id, anchor: .bottom) }

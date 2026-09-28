@@ -1191,6 +1191,7 @@ final class Bench {
                 guard let assistant = browser.assisting else { answer(["open": false]); return }
                 answer([
                     "open": true, "reading": assistant.reading, "notice": assistant.notice ?? "", "trouble": assistant.trouble ?? "",
+                    "addressed": assistant.addressed,
                     "place": assistant.place,
                     "turns": assistant.turns.map { ["question": $0.question ?? "", "answer": $0.answer, "done": $0.done,
                                                      "failed": $0.failed ?? "", "strays": $0.strays] as [String: Any] },
