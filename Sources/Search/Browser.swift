@@ -4086,16 +4086,18 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             decisionHandler(remembered ? .grant : .deny)
             return
         }
-        // One question at a time. A second page asking while the first is still
-        // waiting is refused rather than queued behind it.
-        guard decide == nil else {
-            decisionHandler(.deny)
-            return
-        }
-
-        decide = decisionHandler
-        askedAbout = shy ? "" : key
-        asking = CaptureAsk(host: host, wants: Browser.name(for: type))
+        // Asked over its own page only, as a page's other questions are (see
+        // ask): a tab behind, or the other page of a pair, waits until you go
+        // to it, and is asked then — never over the page you are on.
+        ask(from: webView, show: { [weak self] in
+            guard let self else { return decisionHandler(.deny) }
+            // One question at a time. A second page asking while the first is
+            // still waiting is refused rather than queued behind it.
+            guard decide == nil else { return decisionHandler(.deny) }
+            decide = decisionHandler
+            askedAbout = shy ? "" : key
+            asking = CaptureAsk(host: host, wants: Browser.name(for: type))
+        }, drop: { decisionHandler(.deny) })
     }
 
     /// A page asking where you are. WebKit asks this through a delegate
