@@ -488,10 +488,11 @@ enum Chromium {
 
     /// "v10" and then AES-128-CBC with an IV of sixteen spaces.
     private static func unwrap(_ blob: Data, key: [UInt8]) -> String? {
-        guard blob.count > 3, blob.prefix(3) == Data("v10".utf8) else {
-            // Not encrypted at all, on some very old profiles.
-            return String(data: blob, encoding: .utf8)
-        }
+        // Encrypted, as every Chromium browser on the Mac has done since
+        // 2014, or not taken at all. A profile's files can be written by
+        // anything running as you; a password lying there in the clear is
+        // one only such a program would have put, to have Search keep it.
+        guard blob.count > 3, blob.prefix(3) == Data("v10".utf8) else { return nil }
         let body = [UInt8](blob.dropFirst(3))
         let iv = [UInt8](repeating: 0x20, count: 16)
         var out = [UInt8](repeating: 0, count: body.count + kCCBlockSizeAES128)
