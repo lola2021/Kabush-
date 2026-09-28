@@ -16,6 +16,10 @@ final class TabSwitcher: ObservableObject {
     @Published private(set) var visible = false
     @Published private var previews: [Tab.ID: (address: URL, image: NSImage)] = [:]
 
+    /// A pair's other page, by its first: the pair is one card, with both
+    /// pages pictured side by side (see Browser.switchTabs).
+    var partners: [Tab.ID: Tab.ID] = [:]
+
     private var previewRequests: [Tab.ID: UUID] = [:]
     private var reveal: DispatchWorkItem?
     private var previewRequested = false
@@ -122,7 +126,8 @@ final class TabSwitcher: ObservableObject {
     }
 
     func cachePreview(_ image: NSImage, for id: Tab.ID, address: URL) {
-        guard kept(id) || (visible && candidates.contains(id)) else { return }
+        let shown = candidates.contains(id) || candidates.contains { partners[$0] == id }
+        guard kept(id) || (visible && shown) else { return }
         previews[id] = (address, image)
     }
 
@@ -130,7 +135,8 @@ final class TabSwitcher: ObservableObject {
         guard visible, !previewRequested else { return }
         previewRequested = true
         let token = generation
-        let orderedIDs = [selectedID].compactMap { $0 } + candidates.filter { $0 != selectedID }
+        let firsts = [selectedID].compactMap { $0 } + candidates.filter { $0 != selectedID }
+        let orderedIDs = firsts.flatMap { id in [id] + [partners[id]].compactMap { $0 } }
         let ordered = orderedIDs.compactMap { id in tabs.first { $0.id == id } }
             .filter { $0.id == current || preview(for: $0.id, address: $0.address) == nil }
         for (index, tab) in ordered.enumerated() {
@@ -161,7 +167,8 @@ final class TabSwitcher: ObservableObject {
         guard active, !visible else { return }
         reveal?.cancel()
         reveal = nil
-        previews = previews.filter { candidates.contains($0.key) }
+        let seconds = Set(candidates.compactMap { partners[$0] })
+        previews = previews.filter { key, _ in candidates.contains(key) || seconds.contains(key) }
         visible = true
     }
 }
@@ -222,19 +229,33 @@ struct TabSwitcherOverlay: View {
         }
     }
 
+    private func picture(_ tab: Tab, width: CGFloat, height: CGFloat) -> some View {
+        ZStack {
+            Palette.hover
+            if let preview = switcher.preview(for: tab.id, address: tab.address) {
+                Image(nsImage: preview)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+            } else {
+                Mark(icon: browser.prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: 26)
+            }
+        }
+        .frame(width: width, height: height)
+    }
+
     private func card(_ tab: Tab, width: CGFloat, previewHeight: CGFloat, height: CGFloat) -> some View {
-        Button { browser.commitTabSwitch(picking: tab.id) } label: {
+        let partner: Tab? = switcher.partners[tab.id].flatMap { id in browser.tabs.first { $0.id == id } }
+        let caption: String = partner.map { tab.label + " · " + $0.label } ?? tab.label
+        let side: CGFloat = partner == nil ? width - 16 : (width - 18) / 2
+        return Button { browser.commitTabSwitch(picking: tab.id) } label: {
             VStack(spacing: 7) {
-                ZStack {
-                    Palette.hover
-                    if let preview = switcher.preview(for: tab.id, address: tab.address) {
-                        Image(nsImage: preview)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: width - 16, height: previewHeight)
-                            .clipped()
-                    } else {
-                        Mark(icon: browser.prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: 26)
+                // A pair: its two pages side by side, as on screen.
+                HStack(spacing: 2) {
+                    picture(tab, width: side, height: previewHeight)
+                    if let partner {
+                        picture(partner, width: side, height: previewHeight)
                     }
                 }
                 .frame(width: width - 16, height: previewHeight)
@@ -244,7 +265,7 @@ struct TabSwitcherOverlay: View {
                     if browser.prefs.glyph == .icons, !tab.isBlank {
                         Mark(icon: tab.icon, letter: tab.monogram, size: 13)
                     }
-                    Text(tab.label)
+                    Text(caption)
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)

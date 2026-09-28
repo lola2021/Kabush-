@@ -2824,7 +2824,9 @@ final class Browser: NSObject, ObservableObject {
     /// first. Nothing changes until ⌃ is let go of (`commitTabSwitch`).
     func switchTabs(backwards: Bool) {
         guard let activeID else { return }
-        // A pair once, under its first page.
+        // A pair once, under its first page, pictured with its other one.
+        tabSwitcher.partners = prefs.splitView
+            ? Dictionary(splits.map { ($0.left, $0.right) }, uniquingKeysWith: { first, _ in first }) : [:]
         tabSwitcher.step(row: tabs.filter(standsInRow).map(\.id), current: activeSplit?.left ?? activeID,
                          backwards: backwards)
     }
