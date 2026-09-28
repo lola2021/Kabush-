@@ -57,12 +57,12 @@ final class PaneStage: NSView {
     /// And how far past it the pointer goes before it lets go.
     static let unsnap: CGFloat = 20
 
-    private var tabs: [Tab] = []
-    private var split: TabSplit?
+    fileprivate var tabs: [Tab] = []
+    fileprivate var split: TabSplit?
     private var focused: Tab.ID?
-    private var slots: [StageView] = []
+    fileprivate var slots: [StageView] = []
     private var cues: [FocusCue] = []
-    private let divider = PaneDivider()
+    fileprivate let divider = PaneDivider()
     private var watching: [AnyCancellable] = []
     private var watched: [ObjectIdentifier] = []
     private var queued = false
@@ -72,6 +72,14 @@ final class PaneStage: NSView {
     /// The first page's share while the divider is held; nil otherwise.
     private var live: Double?
     private var snapped = false
+    /// Just let go of: the pair then told of it is no move to show.
+    fileprivate var dragged = false
+    /// Which change is the latest: a picture that arrives for an older one
+    /// is let go.
+    fileprivate var generation = 0
+    /// The pictures standing in for pages while they move.
+    fileprivate var pictures: [NSImageView] = []
+    fileprivate var motionLog: [(NSImageView, CGRect, CGRect)] = []
 
     override var isFlipped: Bool { true }
 
@@ -95,6 +103,33 @@ final class PaneStage: NSView {
     // MARK: - what is shown
 
     func show(_ tabs: [Tab], split: TabSplit?, focused: Tab.ID?) {
+        // A change the eye should follow — a page arriving beside another,
+        // one leaving, the two swapping, the divider moving by itself — is
+        // shown moving (see `animate`). Anything else, a tab switch among
+        // them, is a cut, as it always was.
+        guard let move = motion(to: tabs, split: split), window != nil else {
+            // The same pages again — SwiftUI asking once more — leave a move
+            // under way alone; different ones cut it short.
+            if tabs.map(\.id) != self.tabs.map(\.id) || split?.sizes != self.split?.sizes {
+                generation += 1
+                clearPictures()
+            }
+            return apply(tabs, split: split, focused: focused)
+        }
+        let before = placed()
+        let leaving = self.tabs.filter { before[$0.id] != nil }
+        generation += 1
+        let ticket = generation
+        capture(leaving) { [weak self] pictures in
+            guard let self, ticket == self.generation else { return }
+            self.clearPictures()
+            self.apply(tabs, split: split, focused: focused)
+            self.layoutSubtreeIfNeeded()
+            self.animate(move, from: before, pictures: pictures)
+        }
+    }
+
+    private func apply(_ tabs: [Tab], split: TabSplit?, focused: Tab.ID?) {
         let ids = tabs.map(ObjectIdentifier.init)
         if ids != watched {
             watched = ids
@@ -171,7 +206,7 @@ final class PaneStage: NSView {
     }
 
     /// A page lent to WebKit's full screen window: its slot has the stage.
-    private var immersed: Int? { tabs.firstIndex { $0.immersed } }
+    fileprivate var immersed: Int? { tabs.firstIndex { $0.immersed } }
 
     /// Whether the page in this slot is on screen.
     private func shown(_ index: Int) -> Bool {
@@ -263,6 +298,8 @@ final class PaneStage: NSView {
         guard let fraction = live else { return }
         let id = split?.id
         live = nil
+        // Already where the hand left it: the pair being told is no move.
+        dragged = true
         needsLayout = true
         if let id { onCommit?(id, [fraction, 1 - fraction]) }
     }
@@ -463,5 +500,183 @@ final class PaneDivider: NSView {
     }
     override func accessibilityPerformDecrement() -> Bool {
         stage.map { $0.setShare($0.currentShare - 0.05) } != nil
+    }
+}
+
+// MARK: - moving, not jumping
+
+extension PaneStage {
+    enum Move: Equatable {
+        /// A page coming in beside the one on screen.
+        case enter(Tab.ID)
+        /// One of two going, the other taking the room.
+        case leave(Tab.ID)
+        case swap
+        /// The divider moved by itself: evened out, or from VoiceOver.
+        case resize
+    }
+
+    /// What the change from what is shown to `tabs` is, to the eye; nil for
+    /// a cut.
+    fileprivate func motion(to next: [Tab], split next2: TabSplit?) -> Move? {
+        let old = tabs.map(\.id), new = next.map(\.id)
+        defer { dragged = false }
+        guard bounds.width - PaneStage.gutter >= 2 * PaneStage.narrowest, immersed == nil,
+              !next.contains(where: \.immersed) else { return nil }
+        if old.count == 1, new.count == 2, new.contains(old[0]), let other = new.first(where: { $0 != old[0] }) {
+            return .enter(other)
+        }
+        if old.count == 2, new.count == 1, old.contains(new[0]), let other = old.first(where: { $0 != new[0] }) {
+            return .leave(other)
+        }
+        if old.count == 2, old == Array(new.reversed()) { return .swap }
+        if old.count == 2, old == new, !dragged, let was = split, let now = next2, was.id == now.id,
+           abs(was.fraction - now.fraction) > 0.001 {
+            return .resize
+        }
+        return nil
+    }
+
+    /// Where each page on screen is now.
+    fileprivate func placed() -> [Tab.ID: CGRect] {
+        var out: [Tab.ID: CGRect] = [:]
+        for (index, tab) in tabs.enumerated() where index < slots.count && !slots[index].isHidden {
+            out[tab.id] = slots[index].frame
+        }
+        return out
+    }
+
+    /// Pictures of the pages on screen, as they are. WebKit takes them in a
+    /// frame or so; one slower than a twentieth of a second, and the change
+    /// is a cut instead of a wait. Under Reduce Motion they are still
+    /// taken, for the dissolve.
+    fileprivate func capture(_ pages: [Tab], _ done: @escaping ([Tab.ID: NSImage]) -> Void) {
+        var pictures: [Tab.ID: NSImage] = [:]
+        var waiting = pages.count
+        var finished = false
+        func finish() {
+            guard !finished else { return }
+            finished = true
+            done(pictures)
+        }
+        guard waiting > 0 else { return finish() }
+        for tab in pages {
+            guard let web = tab.built, web.window === window, !web.isHidden else {
+                waiting -= 1
+                if waiting == 0 { finish() }
+                continue
+            }
+            let size = web.bounds.size
+            web.takeSnapshot(with: nil) { image, _ in
+                MainActor.assumeIsolated {
+                    // A test run's window is on no screen, and WebKit pictures
+                    // nothing there: a plain stand-in, so what moves can
+                    // still be followed (see Bench, split motion).
+                    if let image { pictures[tab.id] = image }
+                    else if Store.testing { pictures[tab.id] = PaneStage.standIn(size) }
+                    waiting -= 1
+                    if waiting == 0 { finish() }
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if !finished { pictures = [:] }
+            finish()
+        }
+    }
+
+    private static func standIn(_ size: NSSize) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        Palette.NS.hairline.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    /// The pictures moved from where the pages were to where they are now,
+    /// over pages already laid out at their new size — laid out once, never
+    /// frame by frame — then faded to the live pages. Cropped, never
+    /// squashed: a picture keeps its size and shows what fits.
+    fileprivate func animate(_ move: Move, from before: [Tab.ID: CGRect], pictures: [Tab.ID: NSImage]) {
+        let after = placed()
+        let reduced = Motion.reduced
+        var moving: [(NSImageView, CGRect?)] = []
+        for (id, image) in pictures {
+            guard let start = before[id] else { continue }
+            let view = NSImageView(frame: start)
+            view.image = image
+            view.imageScaling = .scaleNone
+            view.imageAlignment = .alignTopLeft
+            view.wantsLayer = true
+            view.layer?.backgroundColor = Palette.NS.ground.cgColor
+            addSubview(view, positioned: .below, relativeTo: divider)
+            self.pictures.append(view)
+            moving.append((view, after[id]))
+        }
+        motionLog = moving.map { view, end in (view, view.frame, end ?? view.frame) }
+        // The page arriving comes up under the one making room for it.
+        if case .enter(let id) = move, let index = tabs.firstIndex(where: { $0.id == id }), index < slots.count {
+            let slot = slots[index]
+            slot.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = reduced ? 0.15 : 0.3
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                slot.animator().alphaValue = 1
+            }
+        }
+        if case .enter = move, !divider.isHidden {
+            divider.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = reduced ? 0 : 0.14
+                divider.animator().alphaValue = 1
+            }
+        }
+        let fade = { [weak self] in
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = reduced ? 0.15 : 0.12
+                for (view, _) in moving { view.animator().alphaValue = 0 }
+            }, completionHandler: { [weak self] in
+                MainActor.assumeIsolated {
+                    for (view, _) in moving { view.removeFromSuperview() }
+                    self?.pictures.removeAll { view in moving.contains { $0.0 === view } }
+                }
+            })
+        }
+        // Under Reduce Motion nothing travels: the old pictures dissolve
+        // into the new layout.
+        guard !reduced else { return fade() }
+        NSAnimationContext.runAnimationGroup({ context in
+            // Search's glide, as near as a curve comes to its spring:
+            // quick away, settling without a bounce, in about 0.3 s.
+            context.duration = 0.32
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1, 0.36, 1)
+            context.allowsImplicitAnimation = true
+            for (view, end) in moving {
+                if let end {
+                    view.animator().frame = end
+                } else {
+                    // Leaving: a little smaller as it fades.
+                    view.animator().frame = view.frame.insetBy(dx: view.frame.width * 0.01, dy: view.frame.height * 0.01)
+                    view.animator().alphaValue = 0
+                }
+            }
+        }, completionHandler: { MainActor.assumeIsolated { fade() } })
+    }
+
+    fileprivate func clearPictures() {
+        for view in pictures { view.removeFromSuperview() }
+        pictures.removeAll()
+    }
+
+    /// The pictures moving now, where each started and where it is going,
+    /// and where it is this moment: for the bench.
+    var motionNow: [[String: [Double]]] {
+        motionLog.compactMap { view, start, end in
+            guard view.superview != nil else { return nil }
+            let now = view.layer?.presentation()?.frame ?? view.frame
+            func box(_ r: CGRect) -> [Double] { [r.minX, r.minY, r.width, r.height].map { Double($0) } }
+            return ["from": box(start), "to": box(end), "now": box(now)]
+        }
     }
 }

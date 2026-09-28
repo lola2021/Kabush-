@@ -2431,6 +2431,17 @@ final class Bench {
             guard let page = tab() else { answer(["error": "split closeOthers needs id"]); return }
             browser.closeOthers(but: page)
             reply()
+        case "motion":
+            // The pictures moving on the stage now (see PaneStage.animate).
+            func stage(in view: NSView) -> PaneStage? {
+                if let stage = view as? PaneStage { return stage }
+                for sub in view.subviews { if let found = stage(in: sub) { return found } }
+                return nil
+            }
+            guard let root = browser.window?.contentView?.superview, let found = stage(in: root) else {
+                answer(["error": "no split stage in this window"]); return
+            }
+            reply(["motion": found.motionNow])
         case "pose":
             // A card as a page's question would put up, with no page waiting
             // on it: a page that asks is held by WebKit until it is answered,
