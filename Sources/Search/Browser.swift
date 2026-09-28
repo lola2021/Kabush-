@@ -4158,6 +4158,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// sits in: allowing the bubble must not give the site the camera.
     func askedForCapture(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo, type: WKMediaCaptureType,
                          decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        // An extension capturing, however it went about it: the pill says so.
+        if #available(macOS 15.4, *) { ExtensionCapture.shared.watchCapture(webView, frame: frame) }
         let asker = frame.securityOrigin
         let host: String
         let site: String

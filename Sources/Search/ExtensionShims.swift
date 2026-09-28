@@ -1495,7 +1495,6 @@ enum ExtensionShims {
         const P = root.MediaDevices.prototype;
         const realGUM = P.getUserMedia, realGDM = P.getDisplayMedia;
         const held = new Map();
-        const watch = () => { if (captureChannel) askCapture("watch", {}).catch(() => {}); };
         // Called by Search alone (ExtensionCapture.record). WebKit counts an
         // app's call as a click, and only until its first await, so the
         // page's own getDisplayMedia — kept before any of the extension's
@@ -1565,13 +1564,19 @@ enum ExtensionShims {
           const asked = c || {};
           const id = desktopId(asked.video) ?? desktopId(asked.audio);
           if (id !== null) return take(id, asked);
-          return realGUM.call(this, { audio: standard(asked.audio), video: standard(asked.video) })
-            .then((stream) => { watch(); return stream; });
+          const self = this;
+          // An offscreen document is lent to the pill first (see
+          // ExtensionCapture, "lend"); one not made to record is refused.
+          return askCapture("lend", {}).then((reply) => {
+            if (captureChannel && (!reply || !reply.ok)) throw refused(reply);
+            return realGUM.call(self, { audio: standard(asked.audio), video: standard(asked.video) });
+          });
         });
         if (typeof realGDM === "function") {
           put(P, "getDisplayMedia", function (c) {
             const asked = c || {};
-            return askCapture("display", { video: displayVideo(asked.video) }).then((reply) => {
+            const surface = asked.video && typeof asked.video === "object" ? String(asked.video.displaySurface || "") : "";
+            return askCapture("display", { video: displayVideo(asked.video), surface }).then((reply) => {
               const stream = reply && reply.ok && held.get(reply.token);
               if (!stream) throw refused(reply);
               held.delete(reply.token);
@@ -3537,7 +3542,8 @@ enum ExtensionShims {
         case "offscreen.createDocument":
             guard let path = (first as? [String: Any])?["url"] as? String
             else { throw Unsupported(what: "No page for the offscreen document") }
-            try await ExtensionOffscreen.create(path, for: context)
+            let reasons = (first as? [String: Any])?["reasons"] as? [String] ?? []
+            try await ExtensionOffscreen.create(path, reasons: reasons, for: context)
             return nil
         case "offscreen.closeDocument":
             ExtensionOffscreen.close(for: id)

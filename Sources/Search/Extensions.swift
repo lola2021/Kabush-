@@ -145,6 +145,7 @@ final class Extensions: NSObject, ObservableObject {
         // Screen recording: an extension's pages ask Search through this,
         // which knows which page is asking (see ExtensionCapture).
         views.userContentController.addScriptMessageHandler(ExtensionCapture.shared, contentWorld: .page, name: ExtensionCapture.channel)
+        Extensions.pages = views.userContentController
         ExtensionCapture.mockDevices(views.preferences)
         configuration.webViewConfiguration = views
         controller = WKWebExtensionController(configuration: configuration)
@@ -1085,12 +1086,10 @@ final class Extensions: NSObject, ObservableObject {
     /// its popup, or a page of its in a tab. Real events only: a page's
     /// script can dispatch one, but it never reaches here.
     static var touched: [String: Date] = [:]
-    /// Your last click or key anywhere in Search.
-    static var lastInput: Date?
+    /// What every extension page's view shares, by which a tab knows it
+    /// shows one (see ExtensionPageDelegate).
+    static weak var pages: WKUserContentController?
 
-    static func recentlyUsed(within seconds: TimeInterval) -> Bool {
-        lastInput.map { Date().timeIntervalSince($0) < seconds } ?? false
-    }
     private static var touching: Any?
 
     static func watchTouches() {
@@ -1100,7 +1099,6 @@ final class Extensions: NSObject, ObservableObject {
                 ? event.window?.firstResponder as? NSView
                 : event.window?.contentView?.superview?.hitTest(event.locationInWindow)
             while let found = view, !(found is WKWebView) { view = found.superview }
-            Extensions.lastInput = Date()
             if let url = (view as? WKWebView)?.url, url.scheme?.lowercased() == Extensions.scheme, let id = url.host() {
                 Extensions.touched[id] = Date()
             }

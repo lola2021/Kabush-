@@ -49,6 +49,14 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         browser.askedForCapture(webView, origin: origin, frame: frame, type: type, decisionHandler: decisionHandler)
     }
 
+    /// Recording the screen from the popup: only Search's own call
+    /// (ExtensionCapture), never the extension's on its own.
+    @objc(_webView:requestDisplayCapturePermissionForOrigin:initiatedByFrame:withSystemAudio:decisionHandler:)
+    func displayCapture(_ web: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo, systemAudio: Bool,
+                        decisionHandler: @escaping (Int) -> Void) {
+        decisionHandler(ExtensionCapture.shared.displayDecision(for: web))
+    }
+
     /// On screen now.
     var isUp: Bool { popover?.isShown == true }
 

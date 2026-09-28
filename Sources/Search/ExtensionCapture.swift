@@ -65,13 +65,14 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         return required.contains("desktopCapture") || granted.contains("desktopCapture")
     }
 
-    /// Yes from you: now, or before and you have just done something in
-    /// Search — a remembered yes is never used by an extension on its own.
     private var refused: Set<String> = []
 
+    /// Yes from you: now, or before and you have just used this extension —
+    /// its button, its popup, one of its pages. Otherwise it is asked again:
+    /// a remembered yes never lets an extension take the screen on its own.
     private func consent(_ context: WKWebExtensionContext) async -> Bool {
         let id = context.uniqueIdentifier
-        if ExtensionCapture.allowed(id) { return Store.testing || Extensions.recentlyUsed(within: 15) }
+        if ExtensionCapture.allowed(id), Extensions.justUsed(id) { return true }
         // Refused once, not asked again until Search starts afresh: an
         // extension can't wear you down with the question.
         guard !refused.contains(id) else { return false }
@@ -94,9 +95,9 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     }
     private var grants: [String: Grant] = [:]
 
-    private static func token() -> String {
+    private static func token() -> String? {
         var bytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return nil }
         return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
@@ -104,8 +105,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     /// given now, and the recording starts when one of its pages hands it to
     /// getUserMedia (see `consume`).
     func grant(for context: WKWebExtensionContext) async -> String {
-        guard ExtensionCapture.declares(context), await consent(context) else { return "" }
-        let token = ExtensionCapture.token()
+        guard ExtensionCapture.declares(context), await consent(context), let token = ExtensionCapture.token() else { return "" }
         grants = grants.filter { Date().timeIntervalSince($0.value.made) < 60 }
         grants[token] = Grant(extensionID: context.uniqueIdentifier, made: Date())
         return token
@@ -128,8 +128,16 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
             last = ["op": op, "refused": "sender"]
             return replyHandler(["error": "NotAllowedError", "message": "Not allowed here"], nil)
         }
-        if op == "watch" {
-            watch(web, for: context)
+        // The microphone or camera, from an offscreen document: WebKit holds
+        // the request for as long as the page has no window, so one made to
+        // record is lent to the pill first — the pill is up while it listens.
+        // Any other extension page just goes on.
+        if op == "lend" {
+            guard let reasons = ExtensionOffscreen.reasons(of: web) else { return replyHandler(["ok": true], nil) }
+            guard !reasons.isDisjoint(with: ["USER_MEDIA", "DISPLAY_MEDIA"]) else {
+                return replyHandler(["error": "NotAllowedError", "message": "This offscreen document wasn't made to record"], nil)
+            }
+            lendAwhile(web)
             return replyHandler(["ok": true], nil)
         }
         Task { @MainActor in
@@ -154,28 +162,61 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         guard ExtensionCapture.declares(context) || op == "display" else {
             return ["error": "NotAllowedError", "message": "It didn't ask to record your screen"]
         }
+        // An offscreen document records only if it was made to.
+        if let reasons = ExtensionOffscreen.reasons(of: web), reasons.isDisjoint(with: ["USER_MEDIA", "DISPLAY_MEDIA"]) {
+            return ["error": "NotAllowedError", "message": "This offscreen document wasn't made to record"]
+        }
         let video = body["video"] ?? true
+        // Which picker: a screen, or a window. Chrome's sources in order of
+        // preference, or getDisplayMedia's displaySurface.
+        let sources = body["sources"] as? [String] ?? []
+        let first = sources.first { $0 == "screen" || $0 == "window" || $0 == "tab" }
+        let surface = body["surface"] as? String
+        let window = first == "window" || first == "tab" || surface == "window" || surface == "browser"
         switch op {
         // chooseDesktopMedia, from a page: asked, and recorded right away in
         // that page, so a cancelled picker is an empty id, as in Chrome.
         case "choose", "display":
-            guard await consent(context) else { return ["error": "NotAllowedError", "message": "Permission denied"] }
-            let token = ExtensionCapture.token()
-            return await record(in: web, token: token, video: video, context: context)
+            guard await consent(context), let token = ExtensionCapture.token() else {
+                return ["error": "NotAllowedError", "message": "Permission denied"]
+            }
+            return await record(in: web, token: token, video: video, window: window, context: context)
         // An id the worker was given, handed to getUserMedia in a page.
         case "consume":
             guard let token = body["token"] as? String, let grant = grants.removeValue(forKey: token),
                   grant.extensionID == context.uniqueIdentifier, Date().timeIntervalSince(grant.made) < 60
             else { return ["error": "NotAllowedError", "message": "Invalid state"] }
-            return await record(in: web, token: token, video: video, context: context)
+            return await record(in: web, token: token, video: video, window: window, context: context)
         default:
             return ["error": "NotSupportedError", "message": "Unknown request"]
         }
     }
 
     /// The page on screen, then WebKit's getDisplayMedia called in it.
-    private func record(in web: WKWebView, token: String, video: Any, context: WKWebExtensionContext) async -> [String: Any] {
-        await bringForward(web)
+    /// Pages where Search's own call is under way, and the picker it asks
+    /// for (1 a screen, 2 a window): WebKit's question about recording, from
+    /// an extension's page, is yes only for these (see ExtensionPageDelegate).
+    private var inFlight: [ObjectIdentifier: Int] = [:]
+
+    /// WebKit asking, for an extension's page, whether it may show the
+    /// picker: WKDisplayCapturePermissionDecision, 0 no, 1 a screen, 2 a
+    /// window (the same in the WebKit this runs on and in WebKit's main).
+    func displayDecision(for web: WKWebView) -> Int { inFlight[ObjectIdentifier(web)] ?? 0 }
+
+    private func record(in web: WKWebView, token: String, video: Any, window: Bool, context: WKWebExtensionContext) async -> [String: Any] {
+        // An offscreen document has no window: it is lent to the pill while
+        // it records, so what makes WebKit count it as seen is what says it
+        // is recording. A page in a tab is brought forward.
+        let lend = ExtensionOffscreen.reasons(of: web) != nil
+        if lend { await host(web) } else { await bringForward(web) }
+        inFlight[ObjectIdentifier(web)] = window ? 2 : 1
+        let answer = await force(in: web, token: token, video: video, context: context)
+        inFlight[ObjectIdentifier(web)] = nil
+        if lend, answer["ok"] as? Bool != true { giveBack(web) }
+        return answer
+    }
+
+    private func force(in web: WKWebView, token: String, video: Any, context: WKWebExtensionContext) async -> [String: Any] {
         do {
             // Called by the app, so WebKit counts it as a click: the page's
             // own getDisplayMedia, kept by the shim before any of the
@@ -185,13 +226,49 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
                 arguments: ["token": token, "video": video], in: nil, contentWorld: .page)
             guard let reply = result as? [String: Any] else { return ["error": "AbortError", "message": "No answer"] }
             if reply["ok"] as? Bool == true {
-                watch(web, for: context)
+                watch(web, id: context.uniqueIdentifier)
                 return ["ok": true, "token": token]
             }
             return reply
         } catch {
             return ["error": "AbortError", "message": error.localizedDescription]
         }
+    }
+
+    /// Offscreen pages lent to the pill, until their recording ends.
+    private var lent: Set<ObjectIdentifier> = []
+
+    /// Lent for a request that may never start: given back if nothing is
+    /// recording in it half a minute on.
+    private func lendAwhile(_ web: WKWebView) {
+        guard !lent.contains(ObjectIdentifier(web)) else { return }
+        lent.insert(ObjectIdentifier(web))
+        lendings += 1
+        RecordingIndicator.shared.host(web)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self, weak web] in
+            guard let self, let web, !ExtensionCapture.capturing(web) else { return }
+            self.giveBack(web)
+        }
+    }
+
+    /// How many times a page was lent, for the bench.
+    private var lendings = 0
+
+    private func host(_ web: WKWebView) async {
+        lent.insert(ObjectIdentifier(web))
+        lendings += 1
+        RecordingIndicator.shared.host(web)
+        guard !Store.testing else { return }
+        for _ in 0..<20 {
+            if web.window?.isVisible == true,
+               (try? await web.evaluateJavaScript("document.visibilityState")) as? String == "visible" { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    private func giveBack(_ web: WKWebView) {
+        guard lent.remove(ObjectIdentifier(web)) != nil else { return }
+        RecordingIndicator.shared.release(web)
     }
 
     /// WebKit won't start a recording in a page that isn't on screen. Brought
@@ -214,14 +291,31 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
 
     // MARK: - what is recording
 
-    /// Pages of extensions that capture, watched until they stop.
-    private var watched: [ObjectIdentifier: (web: WKWebView, id: String)] = [:]
+    /// Pages of extensions that asked to capture, watched for as long as they
+    /// last — whatever the extension's own code does, the pill says it.
+    private final class Watched {
+        weak var web: WKWebView?
+        let id: String
+        var capturing = false
+        init(_ web: WKWebView, _ id: String) { self.web = web; self.id = id }
+    }
+    private var watched: [ObjectIdentifier: Watched] = [:]
     private static let keys = ["cameraCaptureState", "microphoneCaptureState", "_displayCaptureState"]
 
-    func watch(_ web: WKWebView, for context: WKWebExtensionContext) {
+    /// Every camera or microphone question passes here (Browser.askedForCapture,
+    /// for tabs, the popup and offscreen documents): one from an extension —
+    /// its page, or its frame in a site, as a camera bubble is — is watched.
+    func watchCapture(_ web: WKWebView, frame: WKFrameInfo) {
+        let asker = frame.securityOrigin
+        let id = Browser.extensionScheme(asker.protocol) ? asker.host : web.url.flatMap(Browser.extensionHost)
+        guard let id, !id.isEmpty else { return }
+        watch(web, id: id)
+    }
+
+    func watch(_ web: WKWebView, id: String) {
         let key = ObjectIdentifier(web)
-        guard watched[key] == nil else { return changed() }
-        watched[key] = (web, context.uniqueIdentifier)
+        guard watched[key]?.web == nil else { return changed() }
+        watched[key] = Watched(web, id)
         for path in ExtensionCapture.keys where path != "_displayCaptureState" || web.responds(to: NSSelectorFromString(path)) {
             web.addObserver(self, forKeyPath: path, options: [], context: nil)
         }
@@ -263,14 +357,13 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     private func changed() {
         var by: [String: Recording] = [:]
         for (key, entry) in watched {
-            let web = entry.web
-            guard ExtensionCapture.capturing(web) else {
-                for path in ExtensionCapture.keys where path != "_displayCaptureState" || web.responds(to: NSSelectorFromString(path)) {
-                    web.removeObserver(self, forKeyPath: path)
-                }
-                watched[key] = nil
-                continue
-            }
+            // A page gone: WebKit's views let their observers go with them.
+            guard let web = entry.web else { watched[key] = nil; continue }
+            let now = ExtensionCapture.capturing(web)
+            // Stopped: an offscreen page lent to the pill goes back.
+            if entry.capturing, !now { giveBack(web) }
+            entry.capturing = now
+            guard now else { continue }
             let before = by[entry.id]
             by[entry.id] = Recording(
                 id: entry.id, name: Browser.extensionName(entry.id),
@@ -289,7 +382,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     /// The pages of an extension that are capturing now: for the mark on
     /// their tabs.
     func webViews(of id: String) -> [WKWebView] {
-        watched.values.filter { $0.id == id && ExtensionCapture.capturing($0.web) }.map(\.web)
+        watched.values.filter { $0.id == id }.compactMap(\.web).filter(ExtensionCapture.capturing)
     }
 
     private typealias SetDisplay = @convention(c) (AnyObject, Selector, Int, (@convention(block) () -> Void)?) -> Void
@@ -298,7 +391,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     /// their tracks end.
     func stop(_ id: String) {
         for entry in watched.values where entry.id == id {
-            let web = entry.web
+            guard let web = entry.web else { continue }
             let selector = NSSelectorFromString("_setDisplayCaptureState:completionHandler:")
             if web.responds(to: selector), let method = class_getMethodImplementation(type(of: web), selector) {
                 unsafeBitCast(method, to: SetDisplay.self)(web, selector, 0, nil)
@@ -319,7 +412,8 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         ["grants": grants.count, "last": last,
          "recordings": recordings.map { ["id": $0.id, "what": $0.what] },
          "allowed": ExtensionCapture.allowedIDs,
-         "pill": RecordingIndicator.shared.lines.map { "\($0.name) \($0.what)" }]
+         "pill": RecordingIndicator.shared.lines.map { "\($0.name) \($0.what)" },
+         "lent": lent.count, "lendings": lendings]
     }
 
     // MARK: - test runs
@@ -330,11 +424,38 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
         guard Store.testing else { return }
         // WebKit's own pretend prompt stays: turned off, it grants without
         // asking Search at all, and the question is what is being tested.
-        for (name, on) in [("_setMockCaptureDevicesEnabled:", true), ("_setGetUserMediaRequiresFocus:", false)] {
-            let selector = NSSelectorFromString(name)
-            guard preferences.responds(to: selector), let method = class_getMethodImplementation(type(of: preferences), selector) else { continue }
-            typealias Set = @convention(c) (AnyObject, Selector, Bool) -> Void
-            unsafeBitCast(method, to: Set.self)(preferences, selector, on)
-        }
+        set("_setMockCaptureDevicesEnabled:", true, in: preferences)
+        set("_setGetUserMediaRequiresFocus:", false, in: preferences)
+    }
+
+    /// One of WebKit's preferences it doesn't make public, if it has it.
+    nonisolated static func set(_ name: String, _ on: Bool, in preferences: WKPreferences) {
+        let selector = NSSelectorFromString(name)
+        guard preferences.responds(to: selector), let method = class_getMethodImplementation(type(of: preferences), selector) else { return }
+        typealias Set = @convention(c) (AnyObject, Selector, Bool) -> Void
+        unsafeBitCast(method, to: Set.self)(preferences, selector, on)
+    }
+}
+
+/// The delegate of a tab showing one of an extension's pages: WebKit's
+/// question about recording the screen is answered here — yes only while
+/// Search's own call is under way in that page (ExtensionCapture.record),
+/// no for anything else, however the extension got hold of getDisplayMedia.
+/// Everything else goes on to the window's delegate, as for any tab. Web
+/// tabs don't have one, and keep WebKit's own way: the Mac's picker.
+@available(macOS 15.4, *)
+final class ExtensionPageDelegate: NSObject, WKUIDelegate {
+    weak var next: (WKNavigationDelegate & WKUIDelegate)?
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || (next?.responds(to: selector) ?? false)
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? { next }
+
+    @objc(_webView:requestDisplayCapturePermissionForOrigin:initiatedByFrame:withSystemAudio:decisionHandler:)
+    func displayCapture(_ web: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo, systemAudio: Bool,
+                        decisionHandler: @escaping (Int) -> Void) {
+        MainActor.assumeIsolated { decisionHandler(ExtensionCapture.shared.displayDecision(for: web)) }
     }
 }

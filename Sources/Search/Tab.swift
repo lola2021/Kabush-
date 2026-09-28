@@ -258,8 +258,20 @@ final class Tab: ObservableObject, Identifiable {
     weak var delegate: (WKNavigationDelegate & WKUIDelegate)? {
         didSet {
             built?.navigationDelegate = delegate
-            built?.uiDelegate = delegate
+            built?.uiDelegate = uiDelegate(delegate)
         }
+    }
+    /// An extension's page answers WebKit's question about recording the
+    /// screen itself (see ExtensionCapture); held here, as WebKit doesn't.
+    private var pageDelegate: NSObject?
+
+    private func uiDelegate(_ delegate: (WKNavigationDelegate & WKUIDelegate)?) -> WKUIDelegate? {
+        guard #available(macOS 15.4, *), let pages = MainActor.assumeIsolated({ Extensions.pages }),
+              configuration.userContentController === pages else { return delegate }
+        let made = pageDelegate as? ExtensionPageDelegate ?? ExtensionPageDelegate()
+        made.next = delegate
+        pageDelegate = made
+        return made
     }
     /// The stylesheet a page not yet built is to be armed with.
     private var veils = ""
@@ -598,7 +610,7 @@ final class Tab: ObservableObject, Identifiable {
         Web.pages.add(web)
         Web.inspector(web.configuration.preferences)
         web.navigationDelegate = delegate
-        web.uiDelegate = delegate
+        web.uiDelegate = uiDelegate(delegate)
         if !shy { PageNotifications.provide(web) }
 
         // Each name is cleared before being claimed — registering one twice is
