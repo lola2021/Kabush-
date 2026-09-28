@@ -3405,7 +3405,7 @@ enum ExtensionShims {
             case "tabs.discard":
                 if tab.id != browser.activeID { browser.sleep(tab) }
             default:
-                browser.select(tab)
+                browser.activateForExtension(tab)
             }
             return nil
 

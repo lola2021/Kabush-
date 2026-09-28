@@ -1422,7 +1422,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
 
     func activate(for context: WKWebExtensionContext) async throws {
         guard let tab, let browser else { return }
-        browser.select(tab)
+        browser.activateForExtension(tab)
     }
 
     func close(for context: WKWebExtensionContext) async throws {

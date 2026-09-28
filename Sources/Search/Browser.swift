@@ -2131,6 +2131,14 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// An extension asking for a tab to be the one in front. A page of the
+    /// pair on screen is in view already: the keys stay where they are, so
+    /// an extension can't move typing from one page to the other.
+    func activateForExtension(_ tab: Tab) {
+        if let pair = activeSplit, pair.contains(tab.id) { return }
+        select(tab)
+    }
+
     /// ⌃⌘← and ⌃⌘→: the page on that side.
     func focusPane(onLeft: Bool) {
         guard let pair = activeSplit,
