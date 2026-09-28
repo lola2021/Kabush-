@@ -422,7 +422,7 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
     private typealias SetDisplay = @convention(c) (AnyObject, Selector, Int, (@convention(block) () -> Void)?) -> Void
 
     /// Stop: everything the extension is capturing ends, and its pages see
-    /// their tracks end.
+    /// their tracks end; for a site, its screen only.
     func stop(_ id: String) {
         for entry in watched.values where entry.id == id {
             guard let web = entry.web else { continue }
@@ -430,6 +430,8 @@ final class ExtensionCapture: NSObject, WKScriptMessageHandlerWithReply, Observa
             if web.responds(to: selector), let method = class_getMethodImplementation(type(of: web), selector) {
                 unsafeBitCast(method, to: SetDisplay.self)(web, selector, 0, nil)
             }
+            // A site's Stop ends only its screen: the call it is on goes on.
+            guard entry.extensionID != nil else { continue }
             web.setCameraCaptureState(.none, completionHandler: nil)
             web.setMicrophoneCaptureState(.none, completionHandler: nil)
         }
