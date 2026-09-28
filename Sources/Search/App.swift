@@ -18,6 +18,15 @@ struct SearchApp: App {
     /// What the menus act on: the window in front's browser.
     private var browser: Browser { front.browser ?? SceneSlot.shared.browser }
 
+    init() {
+        // Settings › General › Start with a fresh window: the files are cut
+        // down before any window reads its row from them.
+        if Store.settings.bool(forKey: Preferences.freshKey) {
+            Session.startFresh(spaces: Spaces.read().map(\.id))
+            Browsers.startFresh()
+        }
+    }
+
     var body: some Scene {
         // Where you left it, at the size you left it. SwiftUI saves a
         // window's frame under its id and puts it back before the window

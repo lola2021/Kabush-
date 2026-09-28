@@ -34,6 +34,10 @@ enum WhatsNew {
     static let toggles: [Toggle] = [
         Toggle(title: "AI on pages", detail: "Summarize a page or ask about it. Choose where it runs in Settings › AI.",
                since: "1.0.5", get: { $0.ai }, set: { $0.ai = $1 }),
+        Toggle(title: "Split View", detail: "Two tabs side by side: drag a tab to the edge of a page, or press ⌥⌘N.",
+               since: "1.0.5", get: { $0.splitView }, set: { $0.splitView = $1 }),
+        Toggle(title: "Start with a fresh window", detail: "Your pinned tabs, and none of last time's others.",
+               since: "1.0.5", get: { $0.startsFresh }, set: { $0.startsFresh = $1 }),
 
         Toggle(title: "Tab groups", detail: "Named sections of tabs. Right-click a tab to start one.",
                since: "1.0.4", get: { $0.usesTabGroups }, set: { $0.usesTabGroups = $1 }),

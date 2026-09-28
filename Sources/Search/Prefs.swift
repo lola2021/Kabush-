@@ -109,6 +109,13 @@ final class Preferences: ObservableObject {
     @Published var lazyTabs: Bool {
         didSet { store.set(lazyTabs, forKey: "tabs.lazy") }
     }
+    /// Each launch starts with a fresh window: the pins stay, last time's
+    /// other tabs don't come back (see Session.startFresh). Off unless
+    /// asked for (#406).
+    @Published var startsFresh: Bool {
+        didSet { store.set(startsFresh, forKey: Preferences.freshKey) }
+    }
+    nonisolated static let freshKey = "start.fresh"
     @Published var showsReading: Bool {
         didSet { store.set(showsReading, forKey: "tabs.reading") }
     }
@@ -357,6 +364,7 @@ final class Preferences: ObservableObject {
             .flatMap { try? JSONDecoder().decode([Keyword].self, from: $0) } ?? []
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         lazyTabs = store.bool(forKey: "tabs.lazy")
+        startsFresh = store.bool(forKey: Preferences.freshKey)
         showsReading = store.object(forKey: "tabs.reading") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
         let keeps = store.bool(forKey: "sites.keep")

@@ -321,6 +321,16 @@ enum Browsers {
         return (try? JSONDecoder().decode([WindowRecord].self, from: data)) ?? []
     }
 
+    /// Start with a fresh window (see Session.startFresh): one window, the
+    /// first, where it was; the others' tabs don't come back, and their
+    /// pins are every window's anyway (Pins.swift).
+    static func startFresh() {
+        let records = read()
+        guard records.count > 1 else { return }
+        let first = [records[0]]
+        Disk.write(file, now: true) { try? JSONEncoder().encode(first) }
+    }
+
     /// At launch, once the first window is up.
     static func restoreOnce() {
         guard !restored else { return }

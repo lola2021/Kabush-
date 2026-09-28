@@ -1498,8 +1498,10 @@ final class Browser: NSObject, ObservableObject {
         let restored = restoreRow(saved, space: spaceID, groups: tabGroups)
         splits = restored.splits
         tabs += restored.tabs
-        let front = saved.tabs.isEmpty ? nil : restored.active.flatMap { id in tabs.first { $0.id == id } }
-            ?? (saved.tabs.isEmpty ? nil : tabs.first { $0.pin == nil } ?? tabs.first)
+        // No tab in front (a fresh start, see Session.startFresh): an empty
+        // one beside the pins.
+        let front = saved.tabs.isEmpty || saved.active < 0 ? nil
+            : restored.active.flatMap { id in tabs.first { $0.id == id } } ?? tabs.first { $0.pin == nil } ?? tabs.first
         guard let first = front else {
             // A blank tab costs nothing until it is asked for its page. Its
             // web view — and with it WebKit's helper processes — is built a
