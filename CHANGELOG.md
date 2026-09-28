@@ -43,6 +43,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Escape on a new tab you haven't typed in or gone anywhere from closes it and takes you back to the tab you were on, as if the ⌘T hadn't happened. Anything typed keeps it, and so does it being the only tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#393](https://github.com/driceroland/Search/pull/393), [#389](https://github.com/driceroland/Search/issues/389))
 - Words typed into a new tab's address field and not yet sent are still there when you come back to it from another tab, with the cursor after them. They are kept in memory only, and go once you send them or close the tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#394](https://github.com/driceroland/Search/pull/394), [#390](https://github.com/driceroland/Search/issues/390))
 - An extension page shown inside a website can run a function in a tab with scripting.executeScript, as in Chrome: the function was lost on its way to the extension's worker, and the call refused. Aino's web clipper works again. Thanks [@quanru](https://github.com/quanru) ([#403](https://github.com/driceroland/Search/pull/403))
+- SingleFile saves pages again: its worker failed as it started, and a file it made in its worker couldn't be downloaded. Thanks [@quanru](https://github.com/quanru) ([#405](https://github.com/driceroland/Search/pull/405))
 
 ## 1.0.4 — 27 September 2026
 
