@@ -1707,14 +1707,163 @@ enum ExtensionShims {
           p.then((r) => callback(r));
         });
       }
+      // WebKit's rules take a narrow kind of regular expression: no `|` and
+      // no `(?:`. Tampermonkey's rule for .user.js links has both, so a
+      // script couldn't be installed from a link (idea 197). A pattern
+      // that can be written without them, matching exactly the same
+      // addresses, becomes that many rules; one that can't (a choice inside
+      // a repeated group, a look-around) is left out as before. Nothing is
+      // widened: every rule matches what its pattern matched.
+      const expandRegex = (source, limit = 24) => {
+        let i = 0;
+        // An atom repeated a counted number of times, a{2,4}, written out
+        // as a a a? a?: the same strings, without the braces WebKit refuses.
+        const counted = (atom) => {
+          const m = /^\{(\d+)(,(\d*))?\}/.exec(source.slice(i));
+          if (!m) return atom;
+          const least = Number(m[1]), most = m[2] === undefined ? least : m[3] === "" ? null : Number(m[3]);
+          if (most === null || most < least || most > 12) return null;
+          i += m[0].length;
+          return atom.repeat(least) + (atom + "?").repeat(most - least);
+        };
+        const alternatives = () => {
+          let options = [""];
+          const all = [];
+          while (i < source.length) {
+            const c = source[i];
+            if (c === "\\") {
+              const kind = source[i + 1];
+              const size = kind === "x" ? 4 : kind === "c" ? 3
+                : kind === "u" ? (source[i + 2] === "{" ? source.indexOf("}", i) + 1 - i : 6) : 2;
+              if (size < 2 || /[1-9]/.test(kind || "")) return null;
+              const t = source.slice(i, i + size);
+              i += size;
+              const piece = counted(t);
+              if (piece === null) return null;
+              options = options.map((o) => o + piece);
+              continue;
+            }
+            if (c === "[") {
+              let j = i + 1;
+              if (source[j] === "^") j++;
+              if (source[j] === "]") j++;
+              while (j < source.length && source[j] !== "]") { if (source[j] === "\\") j++; j++; }
+              const t = source.slice(i, j + 1);
+              i = j + 1;
+              const piece = counted(t);
+              if (piece === null) return null;
+              options = options.map((o) => o + piece);
+              continue;
+            }
+            if (c === "|") { all.push(...options); options = [""]; i++; continue; }
+            if (c === ")") break;
+            if (c === "(") {
+              i++;
+              if (source.startsWith("?:", i)) i += 2;
+              else if (source[i] === "?") return null;
+              const inner = alternatives();
+              if (inner === null || source[i] !== ")") return null;
+              i++;
+              if (/^[*+?{]/.test(source[i] || "")) {
+                if (inner.length > 1 || source[i] === "{") return null;
+                options = options.map((o) => o + "(" + inner[0] + ")");
+                continue;
+              }
+              options = options.flatMap((o) => inner.map((x) => o + x));
+              if (options.length > limit) return null;
+              continue;
+            }
+            i++;
+            const piece = /[.\w/:-]/.test(c) ? counted(c) : c;
+            if (piece === null) return null;
+            options = options.map((o) => o + piece);
+          }
+          all.push(...options);
+          return all.length > limit ? null : all;
+        };
+        const out = alternatives();
+        return out === null || i !== source.length ? null : out;
+      };
+      // The rules made from one are kept out of sight: the extension sees its
+      // own, and taking it away takes them too. Their ids come from the
+      // rule's own, so nothing has to be remembered — a relaunch, a worker
+      // started afresh or a second page all know which they are (Security).
+      const madeBase = 1000000000, madeStride = 32;
+      const madeIds = (id) => Number.isInteger(id) && id >= 1 && id < 30000000
+        ? Array.from({ length: madeStride - 1 }, (_, k) => madeBase + id * madeStride + k + 1) : [];
+      const madeFrom = (id, present) => {
+        if (!Number.isInteger(id) || id <= madeBase) return null;
+        const offset = id - madeBase, k = offset % madeStride, from = (offset - k) / madeStride;
+        return k && present.has(from) ? from : null;
+      };
+      const spread = (name, rule, taken) => {
+        const c = rule && rule.condition;
+        const pattern = c && c.regexFilter;
+        if (typeof pattern !== "string" || !/\||\(\?:|\{\d/.test(pattern)) return [rule];
+        const substitution = rule.action && rule.action.redirect && rule.action.redirect.regexSubstitution;
+        if (typeof substitution === "string" && /\\[1-9]/.test(substitution)) return [rule];
+        const patterns = expandRegex(pattern);
+        if (!patterns || !patterns.length) return [rule];
+        const ids = madeIds(rule.id);
+        // An id past what the scheme holds, or one already an extension's
+        // own: this rule isn't written out, and is left out as before.
+        if (patterns.length > 1 && (ids.length < patterns.length - 1 || ids.slice(0, patterns.length - 1).some((id) => taken.has(id)))) return [rule];
+        return patterns.map((regexFilter, k) => ({ ...rule, id: k === 0 ? rule.id : ids[k - 1], condition: { ...c, regexFilter } }));
+      };
+      const rawGet = {};
+      for (const [get, name] of [["getSessionRules", "updateSessionRules"], ["getDynamicRules", "updateDynamicRules"]]) {
+        if (!dnr || typeof dnr[get] !== "function") continue;
+        const original = dnr[get].bind(dnr);
+        rawGet[name] = () => Promise.resolve(original()).then((r) => r || []);
+        put(dnr, get, (filter, callback) => {
+          if (typeof filter === "function") { callback = filter; filter = undefined; }
+          const p = rawGet[name]().then((all) => {
+            const present = new Set(all.map((r) => r.id));
+            const own = all.filter((r) => madeFrom(r.id, present) === null);
+            const ids = filter && Array.isArray(filter.ruleIds) ? new Set(filter.ruleIds) : null;
+            return ids ? own.filter((r) => ids.has(r.id)) : own;
+          });
+          if (typeof callback !== "function") return p;
+          p.then((r) => callback(r), (e) => withLastError(e, callback));
+        });
+      }
       if (dnr) for (const name of ["updateSessionRules", "updateDynamicRules"]) {
         if (typeof dnr[name] !== "function") continue;
         const original = dnr[name].bind(dnr);
         put(dnr, name, (options = {}, callback) => {
-          if (options && Array.isArray(options.addRules)) options = { ...options, addRules: options.addRules.map(mendRule).filter(Boolean) };
+          const ready = (rawGet[name] ? rawGet[name]() : Promise.resolve([])).catch(() => []).then((all) => {
+            const present = new Set(all.map((r) => r.id));
+            if (options && Array.isArray(options.removeRuleIds)) {
+              const gone = new Set(options.removeRuleIds);
+              const extra = all.map((r) => r.id).filter((id) => gone.has(madeFrom(id, present)));
+              if (extra.length) options = { ...options, removeRuleIds: options.removeRuleIds.concat(extra) };
+            }
+            if (options && Array.isArray(options.addRules)) {
+              const leaving = new Set(options.removeRuleIds || []);
+              const taken = new Set([...present].filter((id) => !leaving.has(id) && !leaving.has(madeFrom(id, present))));
+              options.addRules.forEach((r) => r && taken.add(r.id));
+              options = { ...options, addRules: options.addRules.map(mendRule).filter(Boolean).flatMap((r) => spread(name, r, taken)) };
+            }
+          });
           const attempt = async (opts, left) => {
             try { return await original(opts); }
             catch (e) {
+              // WebKit builds one content blocker of an extension's rules,
+              // and it can't hold rules for some sites beside rules for all
+              // but some: Tampermonkey's rule for any .user.js link, all but
+              // its own sites, kept every other rule from loading. The
+              // all-but rules are left out, as a refused rule is.
+              if (/Unable to load declarativeNetRequest rules/.test(String(e && e.message)) && Array.isArray(opts.addRules) && left > 0) {
+                const excluding = (r) => { const c = r && r.condition; return !!(c && (c.excludedRequestDomains || c.excludedInitiatorDomains || c.excludedDomains)); };
+                const narrowing = (r) => { const c = r && r.condition; return !!(c && (c.requestDomains || c.initiatorDomains || c.domains)); };
+                if (opts.addRules.some(excluding) && opts.addRules.some(narrowing)) {
+                  for (const rule of opts.addRules.filter(excluding)) {
+                    const kind = rule && rule.action && rule.action.type || "?";
+                    try { native("debug.error", ["declarativeNetRequest: " + kind + " rule " + (rule && rule.id) + " left out — it excludes sites beside rules for given sites, which WebKit can't load together"]).catch(() => {}); } catch (x) {}
+                  }
+                  return attempt({ ...opts, addRules: opts.addRules.filter((r) => !excluding(r)) }, left - 1);
+                }
+              }
               const at = /rule at index (\d+)/.exec(String(e && e.message));
               if (!at || !Array.isArray(opts.addRules) || left <= 0) throw e;
               const index = Number(at[1]);
@@ -1723,7 +1872,10 @@ enum ExtensionShims {
               return attempt({ ...opts, addRules: opts.addRules.filter((_, i) => i !== index) }, left - 1);
             }
           };
-          const p = attempt(options, 100);
+          const p = ready.then(() => attempt(options, 100));
+          // In a test run, an update that still fails is said, not only
+          // handed back to an extension that may drop it.
+          if (__SEARCH_VERBOSE__) p.catch((e) => { try { native("debug.error", ["declarativeNetRequest: " + name + " failed — " + (e && e.message)]).catch(() => {}); } catch (x) {} });
           if (typeof callback !== "function") return p;
           p.then(() => callback(), (e) => withLastError(e, callback));
         });
