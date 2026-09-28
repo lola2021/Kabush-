@@ -1162,6 +1162,19 @@ final class Bench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                     answer(["kept": AIKeys.hint(for: .openRouter) ?? "", "waiting": AISignIn.waiting, "tabs": browser.tabs.count])
                 }
+            case "engine":
+                // A test run's engine (engine.sh, signed ad-hoc) and a folder
+                // of models shared between test worlds; then the state.
+                if let path = request["path"] as? String {
+                    AIEngine.shared.stop()
+                    AIEngine.testEngine = URL(fileURLWithPath: path)
+                }
+                if let models = request["models"] as? String { AIEngine.testModels = URL(fileURLWithPath: models, isDirectory: true) }
+                AIEngine.shared.refreshState()
+                let running = AIEngine.shared.running
+                answer(["state": "\(AIEngine.shared.state)", "available": AIEngine.shared.available,
+                        "trusted": AIEngine.testEngine.map { AIEngine.trusted($0) } ?? false,
+                        "pid": Int(running.pid), "ready": running.ready])
             case "use":
                 // The add-on on, answered by this provider (and model).
                 guard let provider = (request["provider"] as? String).flatMap(AIProvider.init(rawValue:)) else {

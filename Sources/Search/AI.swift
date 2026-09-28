@@ -12,6 +12,8 @@ import Security
 
 /// Where the answers come from.
 enum AIProvider: String, CaseIterable, Identifiable {
+    /// The model downloaded to this Mac, run by Search's own engine (AIEngine).
+    case thisMac
     case anthropic, openAI, gemini, openRouter
     /// Ollama, on this Mac.
     case ollama
@@ -22,6 +24,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
 
     var name: String {
         switch self {
+        case .thisMac: return "On this Mac"
         case .anthropic: return "Anthropic"
         case .openAI: return "OpenAI"
         case .gemini: return "Google Gemini"
@@ -32,13 +35,15 @@ enum AIProvider: String, CaseIterable, Identifiable {
     }
 
     /// Runs on this Mac: nothing leaves it, and no key is needed.
-    var isLocal: Bool { self == .ollama || self == .lmStudio }
+    var isLocal: Bool { self == .thisMac || self == .ollama || self == .lmStudio }
 
     /// The one address requests go to. A key is kept for this host and is
     /// never sent to any other (see AIClient.request).
     var base: URL {
         if Store.testing, let mock = AIProvider.mock { return mock.appendingPathComponent(rawValue + "/") }
         switch self {
+        // Never asked over the network: the engine is a program of its own.
+        case .thisMac: return URL(string: "http://127.0.0.1:1/")!
         case .anthropic: return URL(string: "https://api.anthropic.com/v1/")!
         case .openAI: return URL(string: "https://api.openai.com/v1/")!
         case .gemini: return URL(string: "https://generativelanguage.googleapis.com/v1beta/")!
@@ -48,7 +53,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         }
     }
 
-    var host: String { base.host() ?? "" }
+    var host: String { self == .thisMac ? "this Mac" : base.host() ?? "" }
 
     /// A test run's stand-in for every provider: a server on this Mac that
     /// answers the way they do (bench ai-mock). Never outside a test run,
@@ -59,6 +64,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
     /// The local apps have no default: the list comes from the app.
     var defaultModel: String {
         switch self {
+        case .thisMac: return AIEngine.model.name
         case .anthropic: return "claude-haiku-4-5"
         case .openAI: return "gpt-5.4-mini"
         case .gemini: return "gemini-3.8-flash"

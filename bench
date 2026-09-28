@@ -63,7 +63,7 @@
                                        each timed until the window has caught up; go: then Return, timed
                                        until the page is loading
     ./bench visible ID                 switched off: it made a window (off screen), and no verb makes one for now
-    ./bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT | signin | use PROVIDER [MODEL] | summarize ID | question ID TEXT | agree | state | picture DIR
+    ./bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT | signin | engine [PATH MODELS] | use PROVIDER [MODEL] | summarize ID | question ID TEXT | agree | state | picture DIR
                                        test run: the AI add-on's requests, against a stand-in on this Mac;
                                        what of a page would go to the model, and an answer checked against it
     ./bench answer once|always|no     test run: the card of a page asking for the camera, microphone or location
@@ -469,7 +469,7 @@ def main(argv):
             elif word == "words": request["words"] = True
             else: sys.exit("usage: bench find TEXT [next N] [back N] [case] [words]")
     elif verb == "ai":
-        usage = "usage: bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT | signin | use PROVIDER [MODEL] | summarize ID | question ID TEXT | agree | state | picture DIR"
+        usage = "usage: bench ai mock URL | key PROVIDER KEY | ask PROVIDER MODEL TEXT | read ID | check TEXT | signin | engine [PATH MODELS] | use PROVIDER [MODEL] | summarize ID | question ID TEXT | agree | state | picture DIR"
         if not args: sys.exit(usage)
         request["action"] = args[0]
         if args[0] == "mock" and len(args) == 2: request["url"] = args[1]
@@ -477,6 +477,8 @@ def main(argv):
         elif args[0] == "ask" and len(args) == 4: request["provider"], request["model"], request["text"] = args[1], args[2], args[3]
         elif args[0] == "read" and len(args) == 2: request["id"] = args[1]
         elif args[0] == "signin" and len(args) == 1: pass
+        elif args[0] == "engine" and len(args) in (1, 3):
+            if len(args) == 3: request["path"], request["models"] = args[1], args[2]
         elif args[0] == "use" and len(args) in (2, 3):
             request["provider"] = args[1]
             if len(args) == 3: request["model"] = args[2]
