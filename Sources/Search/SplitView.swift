@@ -20,7 +20,15 @@ struct SplitStage: View {
                 tabs: shown, split: split, focused: browser.activeID,
                 commit: { id, sizes in browser.setSplitFraction(id, fraction: sizes[0]) },
                 focus: { tab in browser.focusPane(tab) },
-                frames: { frames = $0 }
+                frames: { frames = $0 },
+                action: { action in
+                    switch action {
+                    case .swap: browser.swapSplit()
+                    case .even: browser.evenSplit()
+                    case .separate: if let tab = browser.active { browser.detachSplit(tab) }
+                    case .closeBoth: browser.closeSplit()
+                    }
+                }
             )
             ForEach(shown) { tab in
                 if let frame = frames[tab.id] {
@@ -61,6 +69,14 @@ private struct PaneLayers: View {
             if browser.fieldShowing && focused {
                 Omnibox(browser: browser, over: !tab.isBlank, fitted: true)
                     .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+
+            // An empty page of a pair: the field, and the tabs already open,
+            // to bring one in. Gone while something is typed, when the field's
+            // own list is there.
+            if paired, tab.isBlank, browser.typed.isEmpty {
+                OpenTabs(browser: browser, blank: tab)
+                    .transition(.opacity)
             }
         }
         .overlay {
@@ -123,5 +139,77 @@ private struct SplitDropPreview: View {
                 .padding(.horizontal, 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The open tabs an empty page of a pair can take, most recently used
+/// first. A click brings one in; the empty page goes.
+private struct OpenTabs: View {
+    @ObservedObject var browser: Browser
+    let blank: Tab
+
+    private var candidates: [Tab] {
+        let pair = browser.split(for: blank)
+        return browser.tabs
+            .filter { tab in
+                tab.id != blank.id && pair?.contains(tab.id) != true && tab.pin == nil && !tab.bench
+                    && !tab.isBlank && tab.shy == blank.shy
+            }
+            .sorted { $0.touched > $1.touched }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    var body: some View {
+        let list = candidates
+        GeometryReader { geo in
+            if !list.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Or bring in an open tab")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 4)
+                    ForEach(list) { tab in
+                        OpenTabRow(tab: tab) { browser.fill(blank, with: tab) }
+                    }
+                }
+                // As wide as the field, its rows' text under the field's.
+                .padding(.horizontal, 12)
+                .frame(width: min(Metrics.fieldWidth, max(0, geo.size.width - 28)), alignment: .leading)
+                .frame(maxWidth: .infinity)
+                // Under the field, which stands 60 points above the middle.
+                .offset(y: geo.size.height / 2 + 10)
+            }
+        }
+    }
+}
+
+private struct OpenTabRow: View {
+    @ObservedObject var tab: Tab
+    let bring: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Mark(icon: tab.icon, letter: tab.monogram, size: 15)
+                .frame(width: 15, height: 15)
+            Text(tab.label.isEmpty ? "New Tab" : tab.label)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(hovering ? Palette.ink : Palette.ink.opacity(0.75))
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering ? Palette.hover : .clear))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: bring)
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(tab.label)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Bring this tab into the split")
     }
 }

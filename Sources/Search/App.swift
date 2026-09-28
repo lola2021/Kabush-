@@ -158,14 +158,22 @@ struct SearchApp: App {
                     Button("Split Current Page") { browser.startSplit() }
                         .shortcut("tabs.split")
                         .disabled(browser.active == nil || browser.active?.bench == true)
-                    Button("Focus Other Pane") { browser.focusOtherPane() }
-                        .shortcut("tabs.focusOtherPane")
+                    Button("Focus Left Page") { browser.focusPane(onLeft: true) }
+                        .shortcut("tabs.focusLeftPane")
+                        .disabled(browser.activeSplit == nil)
+                    Button("Focus Right Page") { browser.focusPane(onLeft: false) }
+                        .shortcut("tabs.focusRightPane")
+                        .disabled(browser.activeSplit == nil)
+                    Button("Swap Pages") { browser.swapSplit() }
+                        .shortcut("tabs.swapSplit")
                         .disabled(browser.activeSplit == nil)
                     Button("Separate Split Tabs") {
                         if let tab = browser.active { browser.detachSplit(tab) }
                     }
                     .shortcut("tabs.separateSplit")
                     .disabled(browser.activeSplit == nil)
+                    Button("Close Both Pages") { browser.closeSplit() }
+                        .disabled(browser.activeSplit == nil)
                     Divider()
                 }
                 if let tab = browser.active {
@@ -1153,12 +1161,11 @@ struct ContentView: View {
         // Keep split focus ahead of WebKit's arrow-key handling. Its panes
         // remain native first responders, so the menu shortcut alone would
         // never see ⌃⌘→ on a page.
-        if browser.prefs.splitView,
-           let combo = KeyCombo(event: event),
-           combo == ShortcutStore.shared.key(for: "tabs.focusOtherPane"),
-           browser.activeSplit != nil {
-            browser.focusOtherPane()
-            return true
+        if browser.prefs.splitView, browser.activeSplit != nil, let combo = KeyCombo(event: event) {
+            let store = ShortcutStore.shared
+            if combo == store.key(for: "tabs.focusLeftPane") { browser.focusPane(onLeft: true); return true }
+            if combo == store.key(for: "tabs.focusRightPane") { browser.focusPane(onLeft: false); return true }
+            if combo == store.key(for: "tabs.focusOtherPane") { browser.focusOtherPane(); return true }
         }
 
         // ⌘Return keeps a peek, as its other button does: Return or the

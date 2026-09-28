@@ -971,13 +971,20 @@ struct TabMenu: View {
         }
         if browser.prefs.splitView {
             if browser.split(for: tab) != nil {
-                Button("Separate Split Tabs") { browser.detachSplit(tab) }
-            } else {
-                Button("Split View") {
-                    browser.select(tab)
-                    browser.startSplit()
+                Button("Swap Pages") {
+                    browser.focusPane(tab)
+                    browser.swapSplit()
                 }
-                .disabled(tab.bench)
+                Button("Separate Split Tabs") { browser.detachSplit(tab) }
+                Button("Close Both Pages") {
+                    browser.focusPane(tab)
+                    browser.closeSplit()
+                }
+            } else {
+                // Beside the page on screen; on that page itself, an empty
+                // page beside it.
+                Button("Open in Split View") { browser.openInSplit(tab) }
+                    .disabled(tab.bench)
             }
         }
         if tab.pin == nil, !tab.bench {

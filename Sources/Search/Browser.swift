@@ -1256,6 +1256,10 @@ final class Browser: NSObject, ObservableObject {
         let groupID: UUID?
         /// When it was closed, to weigh against a window closed since.
         var at = Date()
+        /// The other page of the pair it was in, and whether it was on that
+        /// page's left: ⇧⌘T puts it back beside it, while that page is alone.
+        var partner: Tab.ID? = nil
+        var onLeft = false
 
         var label: String { title.isEmpty ? Address.pretty(url) : title }
     }
@@ -2110,6 +2114,75 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// ⌃⌘← and ⌃⌘→: the page on that side.
+    func focusPane(onLeft: Bool) {
+        guard let pair = activeSplit,
+              let tab = tabs.first(where: { $0.id == (onLeft ? pair.left : pair.right) }) else { return }
+        focusPane(tab)
+    }
+
+    /// A tab's menu › Open in Split View: that tab beside the page on
+    /// screen. Asked of the page on screen itself, an empty page beside it.
+    func openInSplit(_ tab: Tab) {
+        guard prefs.splitView, let current = active else { return }
+        if tab.id == current.id { return startSplit() }
+        guard split(for: tab)?.contains(current.id) != true else { return focusPane(tab) }
+        guard canSplit(tab, with: current) else {
+            if tab.pin != nil || current.pin != nil { announce("Unpin the tab to split it") }
+            return
+        }
+        pair(tab, with: current, onLeft: false)
+    }
+
+    /// The divider's menu › Swap Pages.
+    func swapSplit() {
+        guard let pair = activeSplit, let index = splits.firstIndex(where: { $0.id == pair.id }) else { return }
+        let members = pair.tabs.compactMap { id in tabs.first { $0.id == id } }
+        guard members.count == pair.tabs.count, let start = tabs.firstIndex(where: { $0.id == pair.left }) else { return }
+        splits[index].tabs.reverse()
+        splits[index].sizes.reverse()
+        var row = tabs.filter { !pair.contains($0.id) }
+        row.insert(contentsOf: members.reversed(), at: min(start, row.count))
+        tabs = row
+        rememberSession()
+    }
+
+    /// The divider's menu › Even Out, or a double-click on it.
+    func evenSplit() {
+        guard let pair = activeSplit else { return }
+        setSplitFraction(pair.id, fraction: 0.5)
+    }
+
+    /// The divider's menu › Close Both.
+    func closeSplit() {
+        guard let pair = activeSplit else { return }
+        let members = pair.tabs.compactMap { id in tabs.first { $0.id == id } }
+        for tab in members { close(tab) }
+    }
+
+    /// An empty page of a pair given an open tab: the tab takes its place,
+    /// and the empty one goes. Chosen from the list the empty page shows.
+    func fill(_ blank: Tab, with tab: Tab) {
+        guard let pair = split(for: blank), blank.isBlank, tab.id != blank.id, !pair.contains(tab.id),
+              tab.pin == nil, !tab.bench, tab.shy == blank.shy,
+              let at = tabs.firstIndex(where: { $0.id == blank.id }) else { return }
+        detachSplit(tab)
+        let oldGroup = tab.groupID
+        tab.groupID = blank.groupID
+        var row = tabs.filter { $0.id != tab.id }
+        let place = row.firstIndex(where: { $0.id == blank.id }) ?? min(at, row.count)
+        row[place] = tab
+        replaceSplitMember(blank.id, with: tab.id)
+        tabs = row
+        removeEmptyGroup(oldGroup)
+        blank.close()
+        activeID = tab.id
+        editing = false
+        typed = ""
+        if !tab.wake() { tab.revive() }
+        rememberSession()
+    }
+
     func focusOtherPane() {
         guard let pair = activeSplit,
               let other = tabs.first(where: { $0.id == (activeID == pair.left ? pair.right : pair.left) }) else { return }
@@ -2262,9 +2335,8 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
-        let partner = split(for: tab).flatMap { pair in
-            tabs.first { $0.id == (pair.left == tab.id ? pair.right : pair.left) }
-        }
+        let pair = split(for: tab)
+        let partner = pair.flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
         heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
 
@@ -2308,7 +2380,7 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
-        remember(tab, at: index)
+        remember(tab, at: index, partner: partner?.id, onLeft: pair?.left == tab.id)
         tab.close()
         tabs.remove(at: index)
         removeEmptyGroup(tab.groupID)
@@ -2376,11 +2448,17 @@ final class Browser: NSObject, ObservableObject {
         editing = false
         typed = ""
         tab.go(to: ghost.url)
+        // Back into its pair, if the page it was beside is still alone.
+        if let id = ghost.partner, let partner = tabs.first(where: { $0.id == id }),
+           split(for: partner) == nil, canSplit(tab, with: partner) {
+            pair(tab, with: partner, onLeft: ghost.onLeft)
+        }
     }
 
-    private func remember(_ tab: Tab, at index: Int) {
+    private func remember(_ tab: Tab, at index: Int, partner: Tab.ID? = nil, onLeft: Bool = false) {
         guard !tab.shy, let url = tab.address else { return }
-        ghosts.append(Ghost(url: url, title: tab.title, index: index, groupID: tab.groupID))
+        ghosts.append(Ghost(url: url, title: tab.title, index: index, groupID: tab.groupID,
+                            partner: partner, onLeft: onLeft))
         if ghosts.count > 12 { ghosts.removeFirst() }
     }
 
@@ -3381,6 +3459,13 @@ final class Browser: NSObject, ObservableObject {
     func dismiss() {
         summoning = false
         cycling = false
+        // Esc on the empty page of a pair: the page isn't wanted after all.
+        if let tab = active, tab.isBlank, split(for: tab) != nil {
+            editing = false
+            typed = ""
+            close(tab)
+            return
+        }
         // A blank tab has nothing behind the field to go back to.
         guard active?.isBlank == false else { return }
         editing = false
@@ -3400,6 +3485,12 @@ final class Browser: NSObject, ObservableObject {
            let id = offers[picked].tab,
            let tab = tabs.first(where: { $0.id == id }) {
             summoning = false
+            // From the empty page of a pair: that tab comes into the pair.
+            if let blank = active, blank.isBlank, split(for: blank) != nil, !aside,
+               tab.pin == nil, tab.shy == blank.shy, split(for: tab)?.contains(blank.id) != true {
+                fill(blank, with: tab)
+                return
+            }
             select(tab)
             editing = false
             typed = ""

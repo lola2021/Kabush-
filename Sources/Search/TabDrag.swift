@@ -79,6 +79,24 @@ final class TabDrag: ObservableObject {
     private var target: Drop = .outside
     private var escapeMonitor: Any?
 
+    /// Only a page's edges split it, a band of either side about a quarter
+    /// of its width, and no narrower than this: carried across the middle
+    /// of a page on its way elsewhere, a tab splits nothing.
+    static let band: CGFloat = 120
+    static let bandShare: CGFloat = 0.24
+    /// How far out of the band the pointer goes before a shown split lets go.
+    static let slack: CGFloat = 20
+    /// The pointer at rest in a band — moved less than this in `still` — is
+    /// what shows the split. No fixed wait, and no flicker from a tab
+    /// carried straight across.
+    static let settle: CGFloat = 6
+    static let still: TimeInterval = 0.09
+
+    /// Where the pointer has been lately, for whether it has settled.
+    private var trail: [(point: NSPoint, at: TimeInterval)] = []
+    /// A look again once the pointer may have come to rest.
+    private var recheck: DispatchWorkItem?
+
     private init() {}
 
     func register(_ view: SplitDropZone.Marker) {
@@ -97,30 +115,67 @@ final class TabDrag: ObservableObject {
             begin(browser: browser, tab: tab, at: origin)
         }
         guard cancelledID != tab.id else { return true }
-        guard let sourceTab else { return false }
+        guard sourceTab != nil else { return false }
         let point = pointer(in: browser)
+        let now = ProcessInfo.processInfo.systemUptime
+        trail.append((point, now))
+        trail.removeAll { now - $0.at > 0.5 }
+        return look(browser: browser, at: point)
+    }
+
+    /// The split under the pointer, shown once the pointer has settled in an
+    /// edge band, or kept while it is still near the one shown.
+    @discardableResult
+    private func look(browser: Browser, at point: NSPoint) -> Bool {
+        guard let sourceTab else { return false }
         let matched = match(browser: browser, source: sourceTab, at: point)
         target = matched
-        switch matched {
-        case .stage(let page, let onLeft):
-            let shown = Preview(browserID: ObjectIdentifier(browser), targetID: page.id,
-                                side: onLeft ? .left : .right)
-            if preview != shown { preview = shown }
-            return true
-        default:
+        guard case .stage(let page, let onLeft) = matched else {
+            recheck?.cancel()
             if preview != nil { preview = nil }
             return false
         }
+        let wanted = Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right)
+        if preview == wanted { return true }
+        guard settled(at: point) else {
+            // Look again once it may have stopped: a hand at rest sends
+            // nothing more to look at.
+            recheck?.cancel()
+            let work = DispatchWorkItem { [weak self, weak browser] in
+                guard let self, let browser, self.sourceBrowser === browser else { return }
+                self.look(browser: browser, at: self.pointer(in: browser))
+            }
+            recheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + TabDrag.still, execute: work)
+            return true
+        }
+        preview = wanted
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        return true
+    }
+
+    private func settled(at point: NSPoint) -> Bool {
+        let now = ProcessInfo.processInfo.systemUptime
+        let recent = trail.filter { now - $0.at <= TabDrag.still }
+        // Nothing new for a while: at rest.
+        guard let first = recent.first else { return true }
+        return recent.allSatisfy { hypot($0.point.x - point.x, $0.point.y - point.y) < TabDrag.settle }
+            && hypot(first.point.x - point.x, first.point.y - point.y) < TabDrag.settle
     }
 
     func finish(browser: Browser, tab: Tab) -> (source: Tab, drop: Drop, point: NSPoint) {
         let source = sourceTab ?? tab
         let point = pointer(in: browser)
-        let result: Drop
+        var result: Drop
         if cancelledID == tab.id {
             result = .cancelled
         } else if sourceBrowser === browser && gestureTab === tab {
             result = match(browser: browser, source: source, at: point)
+            // A split only where one was shown.
+            if case .stage(let page, let onLeft) = result,
+               preview != Preview(browserID: ObjectIdentifier(browser), targetID: page.id, side: onLeft ? .left : .right) {
+                result = .outside
+            }
         } else {
             result = .outside
         }
@@ -162,6 +217,9 @@ final class TabDrag: ObservableObject {
     }
 
     private func clear() {
+        recheck?.cancel()
+        recheck = nil
+        trail = []
         preview = nil
         sourceBrowser = nil
         gestureTab = nil
@@ -186,7 +244,13 @@ final class TabDrag: ObservableObject {
             view.kind == .stage && view.tab.map { browser.canSplit(source, with: $0) } == true
         }), let page = stage.tab {
             let frame = window.convertToScreen(stage.convert(stage.bounds, to: nil))
-            return .stage(page, onLeft: point.x < frame.midX)
+            let band = max(TabDrag.band, frame.width * TabDrag.bandShare)
+            // The side shown keeps a little more room before it lets go.
+            let shown = preview?.targetID == page.id ? preview?.side : nil
+            let left = band + (shown == .left ? TabDrag.slack : 0)
+            let right = band + (shown == .right ? TabDrag.slack : 0)
+            if point.x <= frame.minX + left { return .stage(page, onLeft: true) }
+            if point.x >= frame.maxX - right { return .stage(page, onLeft: false) }
         }
         guard browser.split(for: source) != nil else { return .outside }
         let pair = browser.split(for: source)

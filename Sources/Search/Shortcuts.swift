@@ -185,13 +185,27 @@ struct Command: Identifiable {
         Command("tabs.search", "Search Tabs…", .tabs, KeyCombo("k")) { browser in
             if browser.editing, !browser.offers.isEmpty { browser.stepSummon() } else { browser.summon() }
         },
-        Command("tabs.split", "Split Current Page", .tabs, KeyCombo("s", control: true)) { browser in
+        // ⌥⌘N, Chrome's on the Mac: ⌃⌘S is the Mac's own Show Sidebar, and
+        // sits beside ⌘S, which folds the tabs away.
+        Command("tabs.split", "Split Current Page", .tabs, KeyCombo("n", option: true)) { browser in
             guard browser.prefs.splitView else { return }
             browser.startSplit()
         },
-        Command("tabs.focusOtherPane", "Focus Other Pane", .tabs, KeyCombo("right", control: true)) { browser in
+        Command("tabs.focusLeftPane", "Focus Left Page", .tabs, KeyCombo("left", control: true)) { browser in
+            guard browser.prefs.splitView else { return }
+            browser.focusPane(onLeft: true)
+        },
+        Command("tabs.focusRightPane", "Focus Right Page", .tabs, KeyCombo("right", control: true)) { browser in
+            guard browser.prefs.splitView else { return }
+            browser.focusPane(onLeft: false)
+        },
+        Command("tabs.focusOtherPane", "Focus Other Page", .tabs, nil) { browser in
             guard browser.prefs.splitView else { return }
             browser.focusOtherPane()
+        },
+        Command("tabs.swapSplit", "Swap Pages", .tabs, nil) { browser in
+            guard browser.prefs.splitView else { return }
+            browser.swapSplit()
         },
         Command("tabs.separateSplit", "Separate Split Tabs", .tabs, nil) { browser in
             guard browser.prefs.splitView, let tab = browser.active else { return }
@@ -418,7 +432,8 @@ extension View {
 extension Command {
     /// Split View's commands: with it off, not listed, and their keys go on
     /// to the page.
-    static let split: Set<String> = ["tabs.split", "tabs.focusOtherPane", "tabs.separateSplit"]
+    static let split: Set<String> = ["tabs.split", "tabs.focusLeftPane", "tabs.focusRightPane", "tabs.focusOtherPane",
+                                     "tabs.swapSplit", "tabs.separateSplit"]
     /// The AI add-on's: with it off, not listed.
     static let ai: Set<String> = ["view.summarize", "view.ask"]
 }

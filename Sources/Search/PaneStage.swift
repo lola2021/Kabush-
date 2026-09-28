@@ -22,6 +22,7 @@ struct PaneStageView: NSViewRepresentable {
     let commit: (UUID, [Double]) -> Void
     let focus: (Tab) -> Void
     let frames: ([Tab.ID: CGRect]) -> Void
+    let action: (PaneStage.Action) -> Void
 
     func makeNSView(context: Context) -> PaneStage { PaneStage() }
 
@@ -29,6 +30,7 @@ struct PaneStageView: NSViewRepresentable {
         stage.onCommit = commit
         stage.onFocus = focus
         stage.onFrames = frames
+        stage.onAction = action
         stage.show(tabs, split: split, focused: focused)
     }
 }
@@ -39,6 +41,10 @@ final class PaneStage: NSView {
     /// Where each page is, from the top left, each time that changes — never
     /// while the divider is being dragged.
     var onFrames: (([Tab.ID: CGRect]) -> Void)?
+    /// The divider's menu.
+    var onAction: ((Action) -> Void)?
+
+    enum Action { case swap, even, separate, closeBoth }
 
     /// Between the pages: room for the divider, and to keep it off the left
     /// page's scroll bar.
@@ -269,6 +275,8 @@ final class PaneStage: NSView {
 
     fileprivate var currentShare: Double { share }
 
+    fileprivate func act(_ action: Action) { onAction?(action) }
+
     // MARK: - a click on a page focuses it
 
     /// With two pages up, a click in the one without the keys gives them to
@@ -420,6 +428,28 @@ final class PaneDivider: NSView {
         let inside = bounds.contains(convert(event.locationInWindow, from: nil))
         hovering = !inside
         light(inside)
+    }
+
+    // MARK: - its menu
+
+    /// What can be done with the pair, from the page area itself: the tabs
+    /// may be folded away.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = NSMenu()
+        for (title, action) in [("Swap Pages", PaneStage.Action.swap), ("Even Out", .even),
+                                ("Separate", .separate), ("Close Both", .closeBoth)] {
+            let item = NSMenuItem(title: title, action: #selector(chose(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = action
+            menu.addItem(item)
+            if action == .even { menu.addItem(.separator()) }
+        }
+        return menu
+    }
+
+    @objc private func chose(_ item: NSMenuItem) {
+        guard let action = item.representedObject as? PaneStage.Action else { return }
+        stage?.act(action)
     }
 
     // MARK: - VoiceOver

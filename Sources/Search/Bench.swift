@@ -2414,6 +2414,22 @@ final class Bench {
             browser.writeSession(now: true)
             reply()
 
+        case "swap": browser.swapSplit(); reply()
+        case "even": browser.evenSplit(); reply()
+        case "closeBoth": browser.closeSplit(); reply()
+        case "dismiss": browser.dismiss(); reply()
+        case "side":
+            browser.focusPane(onLeft: request["left"] as? Bool ?? true)
+            reply()
+        case "openIn":
+            guard let page = tab() else { answer(["error": "split openIn needs id"]); return }
+            browser.openInSplit(page)
+            reply()
+        case "fill":
+            guard let blank = tab(), let page = tab("with") else { answer(["error": "split fill needs id and with"]); return }
+            browser.fill(blank, with: page)
+            reply()
+
         default:
             answer(["error": "unknown split action"])
         }
