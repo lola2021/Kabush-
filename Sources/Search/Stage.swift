@@ -185,7 +185,7 @@ private struct HistoryList: View {
 
     @ViewBuilder
     private func icon(_ url: URL) -> some View {
-        if let host = url.host(), let image = Favicons.shared.cached(host) {
+        if let site = Favicons.site(url), let image = Favicons.shared.cached(site) {
             Image(nsImage: image).resizable().interpolation(.high)
         } else {
             Image(systemName: "globe")

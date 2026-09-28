@@ -43,7 +43,17 @@ final class Favicons {
         NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
     }
 
-    /// The name an icon is kept under: the host, with a suffix for the dark
+    /// Which site an address is, for its icon: its host, and its port when
+    /// it names one — localhost:3000 and localhost:4321 are two projects,
+    /// not one (#413). The port a scheme has anyway doesn't count.
+    nonisolated static func site(_ url: URL) -> String? {
+        guard let host = url.host()?.lowercased(), !host.isEmpty else { return nil }
+        let scheme = url.scheme?.lowercased()
+        guard let port = url.port, !(scheme == "http" && port == 80), !(scheme == "https" && port == 443) else { return host }
+        return "\(host):\(port)"
+    }
+
+    /// The name an icon is kept under: the site, with a suffix for the dark
     /// variant a site offered. Sites without one keep one file for both.
     private static func key(_ host: String, dark: Bool) -> String { dark ? host + "@dark" : host }
 
@@ -93,8 +103,8 @@ final class Favicons {
     func relook(_ tabs: [Tab]) {
         missing = []
         for tab in tabs {
-            guard let host = tab.address?.host()?.lowercased() else { continue }
-            tab.icon = cached(host)
+            guard let site = tab.address.flatMap(Favicons.site) else { continue }
+            tab.icon = cached(site)
             fetch(for: tab)
         }
     }
@@ -111,7 +121,7 @@ final class Favicons {
     /// Asks the page which icon it wants to be known by, fetches it, and keeps
     /// it. Nothing happens if a fresh one is already on disk.
     func fetch(for tab: Tab) {
-        guard let url = tab.address, let host = url.host()?.lowercased(),
+        guard let url = tab.address, let host = Favicons.site(url),
               url.scheme?.hasPrefix("http") == true
         else { return }
 
@@ -120,7 +130,7 @@ final class Favicons {
         // light icon is not enough on its own — the site may offer a dark
         // one that has never been asked for — so the page is asked.
         if Favicons.fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
-            if tab.address?.host()?.lowercased() == host { tab.icon = known }
+            if tab.address.flatMap(Favicons.site) == host { tab.icon = known }
             return
         }
         guard !busy.contains(host), !missing.contains(host) else { return }
@@ -136,7 +146,7 @@ final class Favicons {
                 // No dark variant here after all, and the ordinary one is
                 // fresh: it is the one to wear.
                 if !wantDark, Favicons.fresh(key), let known = self.known(key) {
-                    if tab?.address?.host()?.lowercased() == host {
+                    if tab?.address.flatMap(Favicons.site) == host {
                         tab?.icon = known
                     }
                     self.busy.remove(host)
@@ -285,7 +295,8 @@ final class Favicons {
             scored.append((url, score))
         }
         var list = scored.sorted { $0.1 > $1.1 }.map(\.0)
-        if let host = page.host(), let root = URL(string: "\(page.scheme ?? "https")://\(host)/favicon.ico") {
+        // The same site's root, its port included.
+        if page.host() != nil, let root = URL(string: "/favicon.ico", relativeTo: page)?.absoluteURL {
             list.append(root)
         }
         // The same address twice is a wasted request.

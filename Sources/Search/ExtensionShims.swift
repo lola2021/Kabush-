@@ -3332,7 +3332,7 @@ enum ExtensionShims {
     static func forgetIcons() { favIcons.removeAll() }
 
     private static func favIconURL(_ tab: Tab) -> String? {
-        guard let host = tab.address?.host(), let icon = tab.icon ?? Favicons.shared.cached(host) else { return nil }
+        guard let host = tab.address.flatMap(Favicons.site), let icon = tab.icon ?? Favicons.shared.cached(host) else { return nil }
         if let known = favIcons[host] { return known }
         let side = 32
         guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,

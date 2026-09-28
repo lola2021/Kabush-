@@ -154,7 +154,8 @@ final class SiteNotifications: NSObject {
         content.categoryIdentifier = "site"
         content.sound = .default
         content.userInfo = info
-        if let host = url?.host(), let icon = Favicons.shared.cached(host), let file = SiteNotifications.iconFile(icon, host: host),
+        if let host = url?.host(), let icon = url.flatMap(Favicons.site).flatMap(Favicons.shared.cached),
+           let file = SiteNotifications.iconFile(icon, host: host),
            let attachment = try? UNNotificationAttachment(identifier: "icon", url: file) {
             content.attachments = [attachment]
         }

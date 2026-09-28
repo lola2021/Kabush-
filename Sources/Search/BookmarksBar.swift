@@ -54,7 +54,7 @@ struct BookmarksBar: View {
                         .font(.system(size: 10.5))
                         .foregroundStyle(Palette.muted)
                 } else {
-                    Mark(icon: Favicons.shared.cached(node.host ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 13)
+                    Mark(icon: Favicons.shared.cached(node.site ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 13)
                 }
                 Text(node.title)
                     .font(.system(size: 12))

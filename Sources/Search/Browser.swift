@@ -1482,11 +1482,11 @@ final class Browser: NSObject, ObservableObject {
             FormRelay.passkeysOffered = prefs.passkeys
             // An icon that arrives is put on every tab showing that site, in
             // every window, not only the one that happened to ask for it.
-            Favicons.shared.arrived = { host, image in
-                let lower = host.lowercased()
+            Favicons.shared.arrived = { site, image in
+                let lower = site.lowercased()
                 for browser in Browsers.all {
                     for tab in browser.tabs + browser.parkedTabs {
-                        guard let tabHost = tab.address?.host()?.lowercased() else { continue }
+                        guard let tabHost = tab.address.flatMap(Favicons.site) else { continue }
                         if tabHost == lower || tabHost == "www." + lower || lower == "www." + tabHost {
                             tab.icon = image
                         }

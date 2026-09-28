@@ -241,7 +241,7 @@ enum Chromium {
         var wanted: [(host: String, url: URL)] = []
         var seen = Set<String>()
         for url in urls {
-            guard let host = url.host()?.lowercased(), seen.insert(host).inserted else { continue }
+            guard let host = Favicons.site(url), seen.insert(host).inserted else { continue }
             wanted.append((host, url))
             if wanted.count >= limit { break }
         }
@@ -786,7 +786,7 @@ enum Mozilla {
         var wanted: [(host: String, url: URL)] = []
         var seen = Set<String>()
         for url in urls {
-            guard let host = url.host()?.lowercased(), seen.insert(host).inserted else { continue }
+            guard let host = Favicons.site(url), seen.insert(host).inserted else { continue }
             wanted.append((host, url))
             if wanted.count >= limit { break }
         }

@@ -163,7 +163,7 @@ struct Omnibox: View {
                     // site rather than a magnifying glass. Nothing is fetched
                     // for one that isn't known; the glass is what the row
                     // wears until then.
-                    if let host = offer.url.host()?.lowercased(), let icon = Favicons.shared.cached(host) {
+                    if let site = Favicons.site(offer.url), let icon = Favicons.shared.cached(site) {
                         Image(nsImage: icon)
                             .resizable()
                             .interpolation(.high)

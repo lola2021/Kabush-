@@ -284,8 +284,8 @@ private struct MenuLine: View {
     let url: URL
 
     var body: some View {
-        if let host = url.host()?.lowercased(),
-           let icon = Favicons.shared.cached(host) {
+        if let site = Favicons.site(url),
+           let icon = Favicons.shared.cached(site) {
             Label {
                 Text(title)
             } icon: {
