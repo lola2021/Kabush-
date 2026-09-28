@@ -394,6 +394,10 @@ enum ExtensionShims {
         try { return chrome.extension && typeof chrome.extension.getBackgroundPage === "function" && chrome.extension.getBackgroundPage() === root; }
         catch (e) { return false; }
       })());
+      const manifest = (() => { try { return runtime.getManifest(); } catch (e) { return {}; } })();
+      const backgroundPage = manifest.background || {};
+      const hasWorker = !!(backgroundPage.service_worker || backgroundPage.scripts || backgroundPage.page);
+      const offscreenCapable = [...(manifest.permissions || []), ...(manifest.optional_permissions || [])].includes("offscreen");
       // A script a worker imports that isn't there: Chrome throws at once.
       // WebKit goes looking for it first, and while it does, runs the
       // promises already waiting — code that notes "still starting" until
@@ -842,16 +846,26 @@ enum ExtensionShims {
         if (!event || typeof event.addListener !== "function") return;
         const add = event.addListener.bind(event);
         const remove = event.removeListener.bind(event);
+        const internalMessages = event === runtime.onMessage;
+        const relayHost = internalMessages && offscreenCapable && !hasWorker;
         const listeners = new Set();
         let attached = false;
-        const dispatch = function (message, sender, respond) {
-          if (!background && !relaying && fromOwnPages(sender)) {
+        const dispatch = function (message, sender, respond, local = false) {
+          if (!local && !background && !relaying && fromOwnPages(sender)) {
             const k = relayKey(message);
             if (k && pending(heardRelayed, k)) { count(heardRelayed, k, -1); return; }
             if (k) count(heardNatively, k, 1);
           }
           let settled = false, keep = false;
           const sendResponse = (value) => { if (!settled) { settled = true; respond(value); } };
+          // WebKit excludes the sender's whole page from runtime delivery,
+          // so an offscreen iframe cannot reach its parent directly. Another
+          // context of the same extension carries that delivery to the browser.
+          if (!local && message && message.__searchOffscreenRelay === true && sender.id === runtime.id) {
+            native("offscreen.sendMessage", [message.token, message.message, sender])
+              .then(sendResponse, (error) => sendResponse({ relayError: String(error) }));
+            return true;
+          }
           // Only the worker answers; any other page stays out of it.
           if (message && message.__searchPing === true) {
             if (background) { sendResponse("pong"); return; }
@@ -921,8 +935,10 @@ enum ExtensionShims {
             if (result === true) keep = true;
             else if (result && typeof result.then === "function") { keep = true; result.then(sendResponse, () => sendResponse(undefined)); }
           }
-          if (!inContent) tell(message, keep || settled ? "answers" : "passes", true);
+          if (!local && !inContent) tell(message, keep || settled ? "answers" : "passes", true);
           if (keep || settled) return keep && !settled ? true : undefined;
+          // A direct offscreen delivery has no other local receiver to wait for.
+          if (local) return undefined;
           // Nothing here answers it. In Chrome that leaves the question to
           // the extension's other pages and its worker; WebKit takes the
           // first reply from any of them, and an empty one from a page that
@@ -979,6 +995,14 @@ enum ExtensionShims {
           }
           return undefined;
         };
+        if (internalMessages) {
+          put(root, "__searchOffscreenDispatch", (message, sender) => new Promise((resolve) => {
+            const timer = setTimeout(() => resolve({ handled: false }), 30000);
+            const done = (result) => { clearTimeout(timer); resolve(result); };
+            const waiting = dispatch(message, sender, (value) => done({ handled: true, value }), true);
+            if (waiting !== true) done({ handled: false });
+          }));
+        }
         put(event, "addListener", (listener) => {
           listeners.add(listener);
           if (told) { join(); deliverRelayed = (m, s) => dispatch(m, s, () => {}); }
@@ -986,15 +1010,17 @@ enum ExtensionShims {
         });
         put(event, "removeListener", (listener) => {
           listeners.delete(listener);
-          if (told && listeners.size === 0) leave();
-          if (attached && listeners.size === 0) { attached = false; remove(dispatch); }
+          if (told && listeners.size === 0 && !relayHost) leave();
+          if (attached && listeners.size === 0 && !(internalMessages && (background || relayHost))) {
+            attached = false; remove(dispatch);
+          }
         });
         put(event, "hasListener", (listener) => listeners.has(listener));
         put(event, "hasListeners", () => listeners.size > 0);
         // A worker may only add listeners while it starts; one that adds its
         // first later would be refused. So in a worker the one listener is
         // WebKit's from the start.
-        if (background) { attached = true; add(dispatch); }
+        if (background || relayHost) { attached = true; add(dispatch); if (told) join(); }
       };
       if (runtime) {
         const names = new Set();
@@ -1005,7 +1031,56 @@ enum ExtensionShims {
           if (typeof f === "function") put(runtime, name, f.bind(runtime));
         }
       }
-      if (inContent) return;
+      if (inContent) {
+        // A frame inside this extension's own page — its offscreen
+        // document reading a site, say — is part of that page's tab, and
+        // WebKit brings none of its messages to the page around it. So a
+        // copy goes by way of another of the extension's contexts, which
+        // hands it to the page (see offscreen.sendMessage). Only there: in a
+        // frame of a website, the page above is the website's, and a second
+        // send would only cost every message a round trip (#192).
+        const insideOwnPage = (() => {
+          try {
+            const above = location.ancestorOrigins;
+            return window !== window.top && !!above && above.length > 0 && above[above.length - 1] + "/" === runtime.getURL("");
+          } catch (e) { return false; }
+        })();
+        if (offscreenCapable && insideOwnPage && runtime && typeof runtime.sendMessage === "function") {
+          const send = runtime.sendMessage.bind(runtime);
+          let sequence = 0;
+          const prefix = Array.from(crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(16)).join("-");
+          put(runtime, "sendMessage", (...args) => {
+            const callback = typeof args[args.length - 1] === "function" ? args.pop() : null;
+            const options = args[1];
+            const isOptions = options == null || (typeof options === "object" && !Array.isArray(options)
+              && Object.keys(options).every((key) => key === "includeTlsChannelId"));
+            const explicit = args.length >= 3 || (args.length === 2 && typeof args[0] === "string" && !isOptions);
+            const own = !explicit || !args[0] || args[0] === runtime.id;
+            const original = send(...args);
+            let answer = original;
+            if (own && args.length) {
+              const relay = send({ __searchOffscreenRelay: true, token: prefix + ":" + (++sequence),
+                message: args[explicit ? 1 : 0] }).then((reply) => {
+                  if (reply && reply.relayError) throw new Error(reply.relayError);
+                  return reply && reply.handled ? reply.value : undefined;
+                });
+              // An empty native reply must not beat the parent document's
+              // reply. Preserve the first actual response from either route.
+              answer = new Promise((resolve, reject) => {
+                let left = 2, failure;
+                const done = (value) => {
+                  if (value !== undefined) resolve(value);
+                  if (--left === 0) failure ? reject(failure) : resolve(undefined);
+                };
+                for (const response of [original, relay]) response.then(done, (error) => { failure = error; done(); });
+              });
+            }
+            if (!callback) return answer;
+            answer.then(callback, (error) => withLastError(error, callback));
+          });
+        }
+        return;
+      }
 
       // In a website's frame, everything WebKit keeps to the extension's own
       // process goes through the worker instead. What stays direct is what
@@ -1090,7 +1165,6 @@ enum ExtensionShims {
         // nothing, for good. So after waking it, a page asks the worker
         // itself (its shim answers) at most every few seconds; no answer,
         // and the browser takes the extension up afresh.
-        const hasWorker = (() => { try { const b = runtime.getManifest().background || {}; return !!(b.service_worker || b.scripts || b.page); } catch (e) { return false; } })();
         // The message itself doesn't wait on the answer: a worker busy
         // starting up can take seconds. An empty reply means gone; silence
         // for a quarter of a minute does too.
@@ -2058,13 +2132,14 @@ enum ExtensionShims {
         }
         for (const name of ["get", "getAll", "getCurrent", "getLastFocused", "create"]) mendResult(chrome.windows, name);
         // Listeners given a tab: the tab is mended before they see it.
-        const mendArgs = (target, positions, told) => {
+        const mendArgs = (target, positions, told, skip) => {
           if (!target || typeof target.addListener !== "function") return;
           const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
           const wrapped = new Map();
           put(target, "addListener", (listener, ...rest) => {
             const state = new Map();
             const w = function (...args) {
+              if (skip && skip(args)) return;
               const pending = mend(positions.map((i) => args[i]));
               if (!pending) { if (told) told(args, state); return listener.apply(this, args); }
               pending.then(() => { if (told) told(args, state); listener.apply(this, args); });
@@ -2075,7 +2150,11 @@ enum ExtensionShims {
           put(target, "removeListener", (listener) => { const w = wrapped.get(listener); wrapped.delete(listener); return remove(w || listener); });
           put(target, "hasListener", (listener) => wrapped.has(listener));
         };
-        mendArgs(chrome.tabs.onCreated, [0]);
+        // An offscreen document is a tab to WebKit, so that its frames'
+        // content scripts can name it, but in no window: the extension
+        // never hears of it coming or going, as in Chrome (#192).
+        mendArgs(chrome.tabs.onCreated, [0], null, (args) => isTab(args[0]) && args[0].windowId === -1);
+        mendArgs(chrome.tabs.onRemoved, [], null, (args) => !!args[1] && args[1].windowId === -1);
         // What changed, in onUpdated's changeInfo. Without host access
         // WebKit blanks url and title there ("") and leaves favIconUrl out,
         // and a tab manager, or an extension watching its sign-in tab, reads
@@ -2978,8 +3057,6 @@ enum ExtensionShims {
     /// button should open it.
     static var panelPath: [String: String] = [:]
     static var panelOnClick: Set<String> = []
-    /// Offscreen documents, one per extension, as Chrome allows.
-    static var offscreen: [String: WKWebView] = [:]
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
 
@@ -3303,26 +3380,19 @@ enum ExtensionShims {
 
         // MARK: offscreen — a page with a DOM for a worker that has none
         case "offscreen.createDocument":
-            guard offscreen[id] == nil else { throw Unsupported(what: "Only a single offscreen document may be created.") }
-            guard let path = (first as? [String: Any])?["url"] as? String,
-                  let configuration = context.webViewConfiguration
+            guard let path = (first as? [String: Any])?["url"] as? String
             else { throw Unsupported(what: "No page for the offscreen document") }
-            let page = WKWebView(frame: NSRect(x: 0, y: 0, width: 800, height: 600), configuration: configuration)
-            guard let url = ExtensionShims.page(path, in: context) else { throw Unsupported(what: "No page for the offscreen document") }
-            page.load(URLRequest(url: url))
-            offscreen[id] = page
-            // Answered once the page has loaded, as Chrome does: the worker's
-            // next line is a message to it, and a page still loading has no
-            // one listening yet.
-            for _ in 0..<250 where page.isLoading || page.url == nil {
-                try? await Task.sleep(for: .milliseconds(20))
-            }
+            try await ExtensionOffscreen.create(path, for: context)
             return nil
         case "offscreen.closeDocument":
-            offscreen[id] = nil
+            ExtensionOffscreen.close(for: id)
             return nil
         case "offscreen.hasDocument":
-            return offscreen[id] != nil
+            return ExtensionOffscreen.hasDocument(for: id)
+        case "offscreen.sendMessage":
+            guard args.count == 3, let token = first as? String,
+                  let sender = args[2] as? [String: Any] else { return ["handled": false] }
+            return try await ExtensionOffscreen.send(args[1], sender: sender, token: token, for: id)
 
         // MARK: fonts — what the Mac has; the page's own fonts stay the page's
         case "fontSettings.getFontList":
@@ -3382,7 +3452,7 @@ enum ExtensionShims {
                 add("BACKGROUND", script.map { context.baseURL.appendingPathComponent($0) })
             }
             if ExtensionPopup.shared.extensionID == id { add("POPUP", ExtensionPopup.shared.view?.url) }
-            if let page = offscreen[id] { add("OFFSCREEN_DOCUMENT", page.url) }
+            found += ExtensionOffscreen.contexts(for: id, matching: filter)
             return found
 
         // MARK: notifications — the Mac's own
@@ -3489,7 +3559,7 @@ enum ExtensionShims {
                 pages.append(["id": tab.id.uuidString, "url": url.absoluteString, "visible": shown, "focused": shown && web.window?.isKeyWindow == true])
             }
             // Its offscreen document too, as Chrome lists it.
-            if let url = offscreen[id]?.url { pages.append(["id": "offscreen", "url": url.absoluteString, "visible": false, "focused": false]) }
+            if let url = ExtensionOffscreen.url(for: id) { pages.append(["id": "offscreen", "url": url.absoluteString, "visible": false, "focused": false]) }
             return pages
 
         // MARK: the button's popup

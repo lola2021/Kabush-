@@ -50,6 +50,7 @@ in [ROADMAP.md](ROADMAP.md).
 - An extension page shown inside a website can run a function in a tab with scripting.executeScript, as in Chrome: the function was lost on its way to the extension's worker, and the call refused. Aino's web clipper works again. Thanks [@quanru](https://github.com/quanru) ([#403](https://github.com/driceroland/Search/pull/403))
 - SingleFile saves pages again: its worker failed as it started, and a file it made in its worker couldn't be downloaded. Thanks [@quanru](https://github.com/quanru) ([#405](https://github.com/driceroland/Search/pull/405))
 - The bookmarks list lines up again, in the dropdown and in the manager. With no folders, each bookmark kept an empty place for a folder's arrow in front of it, and an empty band sat under the last one. The line showing where a dragged bookmark would go no longer stays behind once it is let go somewhere else. Thanks [@tomaswarynyca](https://github.com/tomaswarynyca) for reporting ([#391](https://github.com/driceroland/Search/issues/391))
+- Extensions that read pages in an offscreen document work, Lokal among them. The document was answered as ready before it had loaded, and a failed or reloaded one was left behind. A site framed inside it couldn't answer the extension. Now each extension gets one document that is finished loading before it is used, never shown, and closed when the extension is reloaded or turned off. Thanks [@K-NRS](https://github.com/K-NRS) ([#192](https://github.com/driceroland/Search/pull/192))
 
 ## 1.0.4 — 27 September 2026
 

@@ -463,7 +463,7 @@ final class Extensions: NSObject, ObservableObject {
         try? controller.unload(context)
         // What it kept going outside WebKit goes with it: its offscreen
         // page, and a Mac kept awake on its behalf.
-        ExtensionShims.offscreen[id] = nil
+        ExtensionOffscreen.close(for: id)
         if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
