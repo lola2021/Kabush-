@@ -26,6 +26,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- Many tabs no longer slow the tabs down: with tab groups on, each tab worked out the width of every other, so a space of 300 tabs took more than a second to leave; it takes a few hundredths now. Going back to a space no longer reads its whole file again either.
 - Signing in with a passkey works on GitHub again: after Touch ID the site couldn't read the passkey Search handed back (its sign-in code sets a method on it that Search had made read-only). Thanks [@neerajyadav](https://github.com/neerajyadav) ([#407](https://github.com/driceroland/Search/issues/407))
 - A game played on the arrow keys, or any page that reads keys without taking them, no longer makes the Mac beep on each press. Search kept only the last key quiet, so keys pressed quickly or held down beeped, and WebKit hands most such keys to the view around the page rather than back to the page, where nothing wanted them and they fell off the end of the responder chain. Pages that scroll still scroll with the arrows, page up and down and the space bar. Thanks [@pyrossh](https://github.com/pyrossh) for reporting and [@Chahine-tech](https://github.com/Chahine-tech) for the fix ([#402](https://github.com/driceroland/Search/issues/402), [#410](https://github.com/driceroland/Search/pull/410))
 - Search weighs less again: 5.3 MB where 1.0.4 had grown to 6.1. The app is now built for size, at the same speed (launch, scrolling and typing measured side by side), and its icon catalog is packed tighter with every Dock style kept.

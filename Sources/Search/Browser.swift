@@ -1877,7 +1877,7 @@ final class Browser: NSObject, ObservableObject {
         }
         // A parked row's groups are the ones saved for it (see allRows).
         var saved = readRow(space)
-        var groups = saved.groups ?? []
+        var groups = parked[space]?.groups ?? saved.groups ?? []
         if var row = parked[space] {
             let new = fresh(row.tabs.compactMap { ($0.pending ?? $0.address)?.absoluteString })
             row.tabs += new.map { page in
@@ -1885,6 +1885,7 @@ final class Browser: NSObject, ObservableObject {
                 tab.groupID = group(page.folder, in: &groups)
                 return tab
             }
+            row.groups = groups
             parked[space] = row
             if groups != (saved.groups ?? []) {
                 saved.groups = groups
@@ -1929,7 +1930,7 @@ final class Browser: NSObject, ObservableObject {
         }
         rows[spaceID.uuidString] = session(tabs, active: activeID, groups: tabGroups, splits: splits)
         for (space, row) in parked {
-            rows[space.uuidString] = session(row.tabs, active: row.active, groups: readRow(space).groups, splits: row.splits)
+            rows[space.uuidString] = session(row.tabs, active: row.active, groups: row.groups ?? readRow(space).groups, splits: row.splits)
         }
         return rows
     }
@@ -2006,7 +2007,7 @@ final class Browser: NSObject, ObservableObject {
     /// only place a space off screen keeps them: written without them, the
     /// space would lose every group it had.
     private func writeSession(now: Bool, space: UUID, row: Parked) {
-        let groups = readRow(space).groups
+        let groups = row.groups ?? readRow(space).groups
         writeRow(space, session(row.tabs, active: row.active, groups: groups, splits: row.splits), now: now)
     }
 
@@ -3082,6 +3083,7 @@ final class Browser: NSObject, ObservableObject {
         let saved = readRow(space)
         var restored = restoreRow(saved, space: space, groups: saved.groups ?? [])
         if restored.active == nil { restored.active = restored.tabs.first?.id }
+        restored.groups = saved.groups
         return restored
     }
 

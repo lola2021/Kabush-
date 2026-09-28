@@ -162,6 +162,10 @@ struct Parked {
     var tabs: [Tab]
     var active: Tab.ID?
     var splits: [TabSplit] = []
+    /// Its groups, as its file has them: kept here so that writing the row,
+    /// or coming back to the space, doesn't read and decode the file again
+    /// on the main thread. Nil when unknown, for the file to say.
+    var groups: [TabGroup]? = nil
 }
 
 extension Browser {
@@ -194,10 +198,12 @@ extension Browser {
         // The row on screen is parked as it is, sound and all: music or a
         // stream keeps playing in the space you left, as it does in a tab
         // you left. ⌘⇧M, or its speaker, stops it.
-        parked[spaceID] = Parked(tabs: tabs, active: activeID, splits: splits)
+        parked[spaceID] = Parked(tabs: tabs, active: activeID, splits: splits, groups: tabGroups)
 
         spaceID = id
-        tabGroups = readRow(id).groups ?? []
+        // A space kept in memory has its groups with it; one that isn't is
+        // read whole just below (restoreSession), groups included.
+        tabGroups = parked[id]?.groups ?? []
         // The space new pages are made in, when this is the window in front;
         // and the one to come back to, when this is the oldest window.
         if Browsers.front === self || Browsers.front == nil { Spaces.current = id }
