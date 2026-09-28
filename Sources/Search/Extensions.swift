@@ -1187,6 +1187,19 @@ extension Extensions: WKWebExtensionControllerDelegate {
             throw NSError(domain: "Search", code: 2, userInfo: [NSLocalizedDescriptionKey: "Private windows can't be opened by extensions."])
         }
         for url in configuration.tabURLs { try Extensions.mayOpen(url) }
+        // A popup has no address bar, only the site over the page: a website,
+        // or this extension's own page. Not a data: or blob: page, which
+        // could draw anything and name no site, nor another extension's.
+        if configuration.windowType == .popup {
+            for url in configuration.tabURLs {
+                let scheme = url.scheme?.lowercased() ?? ""
+                let own = [Extensions.scheme, Extensions.formerScheme].contains(scheme)
+                    && url.host()?.lowercased() == extensionContext.uniqueIdentifier.lowercased()
+                guard scheme == "https" || scheme == "http" || own || url.absoluteString == "about:blank" else {
+                    throw NSError(domain: "Search", code: 3, userInfo: [NSLocalizedDescriptionKey: "A popup window shows a website or the extension's own page."])
+                }
+            }
+        }
         let fresh = Browser(record: WindowRecord(space: browser?.spaceID ?? Space.firstID))
         // A popup, as a password manager's vault or a sign-in opens: a small
         // window of the page, not another browser window.
@@ -1205,7 +1218,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
         let asked = configuration.frame
         let usable = !asked.isNull && [asked.minX, asked.minY, asked.width, asked.height].allSatisfy(\.isFinite)
             && asked.width >= 200 && asked.height >= 150
-        var frame: NSRect? = usable ? asked : nil
+        var frame: NSRect? = usable ? Extensions.onScreen(asked) : nil
         if frame == nil, fresh.extensionPopup != nil, let screen = (browser?.window?.screen ?? NSScreen.main)?.visibleFrame {
             frame = Self.popupFrame(asked: asked, on: screen)
         }
@@ -1216,6 +1229,26 @@ extension Extensions: WKWebExtensionControllerDelegate {
 
     /// A popup given its size without a place (Affinity's sign-in): that
     /// size, in the middle of the screen. Nil when the size isn't one either.
+    /// A frame an extension asked for, kept where you can see it: no larger
+    /// than the screen it is mostly on, and with a good part of it on one —
+    /// never a window pushed off every screen, or one bigger than all of them.
+    @MainActor
+    static func onScreen(_ asked: NSRect) -> NSRect {
+        let screens = NSScreen.screens.map(\.visibleFrame)
+        guard let home = screens.max(by: { $0.intersection(asked).area < $1.intersection(asked).area })
+                ?? NSScreen.main?.visibleFrame
+        else { return asked }
+        var frame = asked
+        frame.size.width = min(frame.width, home.width)
+        frame.size.height = min(frame.height, home.height)
+        let seen = screens.map { $0.intersection(frame) }.max { $0.area < $1.area } ?? .zero
+        if seen.width < min(160, frame.width) || seen.height < min(120, frame.height) {
+            frame.origin.x = min(max(frame.minX, home.minX), home.maxX - frame.width)
+            frame.origin.y = min(max(frame.minY, home.minY), home.maxY - frame.height)
+        }
+        return frame
+    }
+
     nonisolated static func popupFrame(asked: CGRect, on screen: CGRect) -> CGRect? {
         guard !asked.isNull, asked.width.isFinite, asked.height.isFinite, asked.width >= 200, asked.height >= 150 else { return nil }
         let width = min(asked.width, screen.width), height = min(asked.height, screen.height)
@@ -1456,7 +1489,7 @@ final class ExtensionWindow: NSObject, WKWebExtensionWindow {
         let size = NSSize(width: max(window.minSize.width, or(frame.size.width, now.width)),
                           height: max(window.minSize.height, or(frame.size.height, now.height)))
         let origin = NSPoint(x: or(frame.origin.x, now.origin.x), y: or(frame.origin.y, now.origin.y))
-        window.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+        window.setFrame(Extensions.onScreen(NSRect(origin: origin, size: size)), display: true, animate: false)
     }
 }
 
@@ -1755,4 +1788,8 @@ private struct ExtensionMenu: View {
             .onHover { hovering = $0 }
         }
     }
+}
+
+private extension CGRect {
+    var area: CGFloat { isNull ? 0 : width * height }
 }

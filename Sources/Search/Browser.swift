@@ -2429,13 +2429,19 @@ final class Browser: NSObject, ObservableObject {
             if provider.canLoadObject(ofClass: URL.self) {
                 took = true
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url else { return }
+                    // A page decides what a link dragged out of it carries: never
+                    // script, nor an extension's page, which would open with
+                    // that extension's own powers.
+                    guard let url, !["javascript", "chrome-extension", "webkit-extension"].contains(url.scheme?.lowercased() ?? "")
+                    else { return }
                     DispatchQueue.main.async { self.open(url, foreground: true) }
                 }
             } else if provider.canLoadObject(ofClass: String.self) {
                 took = true
                 _ = provider.loadObject(ofClass: String.self) { text, _ in
-                    guard let text, let url = Address.url(from: text) else { return }
+                    guard let text, let url = Address.url(from: text),
+                          !["javascript", "chrome-extension", "webkit-extension"].contains(url.scheme?.lowercased() ?? "")
+                    else { return }
                     DispatchQueue.main.async { self.open(url, foreground: true) }
                 }
             }

@@ -134,9 +134,17 @@ struct LittleView: View {
         .ignoresSafeArea()
     }
 
+    /// The page on screen — not one still on its way, which a page can
+    /// start and never finish — named as the site, or as what it is when
+    /// it isn't a website, and marked when it came over plain http.
     private var site: String {
-        guard let url = tab.address else { return "" }
-        return SiteCard.site(url)
+        guard let url = tab.pageAddress else { return "" }
+        switch url.scheme?.lowercased() {
+        case "https": return SiteCard.site(url)
+        case "http": return "Not secure — " + SiteCard.site(url)
+        case "chrome-extension", "webkit-extension": return "Extension page"
+        default: return url.absoluteString == "about:blank" ? "" : "Not a website"
+        }
     }
 }
 
