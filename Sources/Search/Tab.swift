@@ -28,7 +28,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -484,6 +484,7 @@ final class Tab: ObservableObject, Identifiable {
     private let forms = FormRelay()
     private let images = ImageRelay()
     private let shop = StoreRelay()
+    private let iconChanges = IconRelay()
     private let middles = MiddleRelay()
     private let passkeyRelay = PasskeyRelay()
     private let hovered = HoveredLink()
@@ -624,6 +625,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(veils_, contentWorld: Web.world, name: VeilRelay.name)
         controller.add(images, contentWorld: Web.world, name: ImageRelay.name)
         controller.add(shop, contentWorld: Web.world, name: StoreRelay.name)
+        controller.add(iconChanges, contentWorld: Web.world, name: IconRelay.name)
         controller.add(forms, contentWorld: Web.world, name: FormRelay.name)
         controller.addScriptMessageHandler(passkeyRelay, contentWorld: Web.world, name: PasskeyRelay.name)
         hovered.tab = self
@@ -683,6 +685,7 @@ final class Tab: ObservableObject, Identifiable {
         forms.tab = self
         images.tab = self
         shop.tab = self
+        iconChanges.tab = self
         middles.tab = self
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
@@ -729,6 +732,9 @@ final class Tab: ObservableObject, Identifiable {
         )
         controller.addUserScript(
             WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+        )
+        controller.addUserScript(
+            WKUserScript(source: IconRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )
         if AutoScroll.on {
             controller.addUserScript(

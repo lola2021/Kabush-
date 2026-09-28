@@ -60,6 +60,7 @@ in [ROADMAP.md](ROADMAP.md).
 - The address being edited in a tab scrolls with the caret: the field was as wide as the whole address and the row cut it off, so ← and → moved the caret out of sight and the end of a long address never showed. Thanks [@StefanTodorov32](https://github.com/StefanTodorov32) ([#421](https://github.com/driceroland/Search/pull/421), [#419](https://github.com/driceroland/Search/issues/419))
 - The site card opens above the address of a tab near the bottom of the screen, when there is no room under it. Pushed up to fit, it covered the field the address was being edited in, and what was typed there. Thanks [@StefanTodorov32](https://github.com/StefanTodorov32) ([#420](https://github.com/driceroland/Search/pull/420), [#418](https://github.com/driceroland/Search/issues/418))
 - Two sites on the same address with different ports, such as localhost:3000 and localhost:4321, each have their own icon: icons were kept by the host alone, so two local projects wore whichever icon came last. Thanks [@wouter-deen](https://github.com/wouter-deen) for reporting ([#413](https://github.com/driceroland/Search/issues/413))
+- A site that changes its icon after it has loaded, as GitHub does with its theme, shows the new one, and a site's light and dark icons no longer take each other's place. Thanks [@keyding](https://github.com/keyding) for reporting ([#423](https://github.com/driceroland/Search/issues/423))
 
 ## 1.0.4 — 27 September 2026
 
