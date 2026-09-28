@@ -468,6 +468,10 @@ final class PageFind {
                 return;
             }
             if (node.nodeType !== 1) return;
+            // Each element's style is asked for, which is what costs: past
+            // the budget the walk stops, and the count says there may be
+            // more, rather than the page holding Find up (Security).
+            if (--state.budget < 0) { state.cut = true; return; }
             const element = node;
             const box = layout(element, context.doc);
             if (!box) return;
@@ -495,6 +499,8 @@ final class PageFind {
 
     function buildRuns(foundContexts) {
         state.controls = [];
+        state.budget = 60000;
+        state.cut = false;
         const runs = [];
         for (const context of foundContexts) {
             observe(context);
@@ -749,6 +755,6 @@ final class PageFind {
     const total = state.matches.length;
     state.index = ((target % total) + total) % total;
     mark(state.matches[state.index]);
-    return answer("ok", total, state.index + 1, !state.complete);
+    return answer("ok", total, state.index + 1, !state.complete || !!state.cut);
     """#
 }
