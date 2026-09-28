@@ -112,11 +112,25 @@ enum AIPage {
         case .question(let question):
             asked = question
         }
+        // The page's own title and address are the website's words too, so
+        // they go inside the fence; the address without what follows its
+        // path — a query or fragment can carry a sign-in link's token.
+        var address = "unknown"
+        if let url = read.url, var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            parts.query = nil
+            parts.fragment = nil
+            parts.user = nil
+            parts.password = nil
+            address = String((parts.string ?? "unknown").prefix(300))
+        }
+        let title = read.title
+            .replacingOccurrences(of: "<\(fence)>", with: "")
+            .replacingOccurrences(of: "</\(fence)>", with: "")
         return """
-        Page title: \(read.title)
-        Page address: \(read.url?.absoluteString ?? "unknown")\(read.cut ? "\n(The page is long: its middle was left out.)" : "")
-
         <\(fence)>
+        Page title: \(title)
+        Page address: \(address)\(read.cut ? "\n(The page is long: its middle was left out.)" : "")
+
         \(text)
         </\(fence)>
 
@@ -136,39 +150,82 @@ enum AIPage {
     /// doesn't have — in its text, its links or its own address. A model
     /// talked into it by the page would put them there: a "support number",
     /// a link to "verify your account".
-    static func strays(in answer: String, from read: Read) -> [String] {
-        let page = (read.text + "\n" + read.title + "\n" + (read.url?.absoluteString ?? "") + "\n" + read.links.joined(separator: "\n")).lowercased()
-        let bare = { (text: String) -> String in
-            var text = text.lowercased()
-            for prefix in ["https://", "http://", "www."] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }
-            while let last = text.last, ".,;:!?)]}'\"/".contains(last) { text.removeLast() }
-            return text
+    ///
+    /// Looked for a word at a time, each word no longer than 300 characters,
+    /// and in no more than the first 12,000 characters of the answer: an
+    /// answer made of one enormous word can't make the check take forever.
+    /// What the page has is gathered the same way, and compared whole — a
+    /// site by its full name (bank.co is not bank.com), a number as a run of
+    /// digits the page wrote, not digits scattered through it.
+    nonisolated static func strays(in answer: String, from read: Read) -> [String] {
+        let said = normalized(String(answer.prefix(12_000)))
+        let pageText = normalized(read.text + "\n" + read.title)
+        var pageEmails = Set<String>(), pageHosts = Set<String>(), pagePhones = Set<String>()
+        for word in words(pageText) + read.links + [read.url?.absoluteString ?? ""] {
+            for email in matches(emailPattern, in: word) { pageEmails.insert(email.lowercased()) }
+            for place in matches(placePattern, in: word) { if let host = host(of: place) { pageHosts.insert(host) } }
         }
-        let pageDigits = page.filter(\.isNumber)
+        for line in lines(pageText) {
+            for phone in matches(phonePattern, in: line) { pagePhones.insert(phone.filter(\.isNumber)) }
+        }
+        if let host = read.url?.host()?.lowercased() { pageHosts.insert(host.hasPrefix("www.") ? String(host.dropFirst(4)) : host) }
+
         var found: [String] = []
         func note(_ item: String) { if !found.contains(item) { found.append(item) } }
-
-        let emails = matches(#"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#, in: answer)
-        for email in emails where !page.contains(email.lowercased()) { note(email) }
-        for found in matches(#"(?:https?://|www\.)[^\s<>()\[\]"']+|\b(?:[A-Za-z0-9\-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]"']*)?"#, in: answer) {
-            var match = found
-            while let last = match.last, ".,;:!?".contains(last) { match.removeLast() }
-            let item = bare(match)
-            let written = match.lowercased().hasPrefix("http") || match.lowercased().hasPrefix("www.")
-            // Part of an email, or a file's name ("config.json"), is not a
-            // place to go.
-            let ending = item.split(separator: "/").first?.split(separator: ".").last.map(String.init) ?? ""
-            guard item.contains("."), !emails.contains(where: { $0.lowercased().contains(item) }),
-                  item.rangeOfCharacter(from: .letters) != nil, written || !fileEndings.contains(ending)
-            else { continue }
-            if !page.contains(item) { note(match) }
+        for word in words(said) {
+            let emails = matches(emailPattern, in: word)
+            for email in emails where !pageEmails.contains(email.lowercased()) { note(email) }
+            for place in matches(placePattern, in: word) {
+                var shown = place
+                while let last = shown.last, ".,;:!?".contains(last) { shown.removeLast() }
+                let written = shown.lowercased().hasPrefix("http") || shown.lowercased().hasPrefix("www.")
+                guard let host = host(of: shown), host.contains("."), host.rangeOfCharacter(from: .letters) != nil,
+                      !emails.contains(where: { $0.lowercased().hasSuffix("@" + host) })
+                else { continue }
+                // A file's name ("config.json") is not a place to go.
+                let ending = host.split(separator: ".").last.map(String.init) ?? ""
+                guard written || !fileEndings.contains(ending) else { continue }
+                if !pageHosts.contains(host) { note(shown) }
+            }
         }
-        for match in matches(#"\+?\d[\d\s().\-]{6,}\d"#, in: answer) {
-            let digits = match.filter(\.isNumber)
-            guard digits.count >= 7, !pageDigits.contains(digits) else { continue }
-            note(match.trimmingCharacters(in: .whitespaces))
+        for line in lines(said) {
+            for phone in matches(phonePattern, in: line) {
+                let digits = phone.filter(\.isNumber)
+                guard digits.count >= 7, !pagePhones.contains(where: { $0.contains(digits) }) else { continue }
+                note(phone.trimmingCharacters(in: .whitespaces))
+            }
         }
         return found
+    }
+
+    private static let emailPattern = #"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#
+    private static let placePattern = #"(?:https?://|www\.)[^\s<>()\[\]"']+|\b(?:[A-Za-z0-9\-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]"']*)?"#
+    private static let phonePattern = #"\+?\d[\d\s().\-]{6,}\d"#
+
+    /// Look-alikes made plain: full-width letters and digits, and the dots a
+    /// name can be written with instead of ".".
+    private static func normalized(_ text: String) -> String {
+        text.precomposedStringWithCompatibilityMapping
+            .replacingOccurrences(of: "\u{3002}", with: ".")
+            .replacingOccurrences(of: "\u{FF61}", with: ".")
+    }
+
+    private static func words(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isWhitespace).map { String($0.prefix(300)) }
+    }
+
+    private static func lines(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).map { String($0.prefix(400)) }
+    }
+
+    /// The site a web address or bare name is for, without www.
+    private static func host(of place: String) -> String? {
+        var text = place.lowercased()
+        for prefix in ["https://", "http://"] where text.hasPrefix(prefix) { text.removeFirst(prefix.count) }
+        var host = String(text.split(whereSeparator: { "/?#:".contains($0) }).first ?? "")
+        while let last = host.last, ".,;:!?)]}'\"".contains(last) { host.removeLast() }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        return host.isEmpty ? nil : host
     }
 
     /// What a file's name ends with, rather than a site's.
@@ -178,7 +235,7 @@ enum AIPage {
         "doc", "docx", "xls", "xlsx", "ppt", "pptx", "mp3", "mp4", "mov", "wav", "log", "plist", "ini", "toml",
     ]
 
-    private static func matches(_ pattern: String, in text: String) -> [String] {
+    nonisolated private static func matches(_ pattern: String, in text: String) -> [String] {
         guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
         return expression.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
             Range($0.range, in: text).map { String(text[$0]) }
@@ -203,7 +260,13 @@ enum AIPage {
         if (parseFloat(s.opacity) < 0.1 || s.contentVisibility === 'hidden') return false;
         if (parseFloat(s.fontSize) < 6) return false;
         // Clipped away to nothing: the "for screen readers only" trick.
-        if ((s.clip && s.clip.indexOf('rect(0') === 0) || /inset\\(50%|circle\\(0/.test(s.clipPath || '')) return false;
+        if ((s.clip && s.clip.indexOf('rect(0') === 0) || /circle\\(0/.test(s.clipPath || '')) return false;
+        var inset = /inset\\((\\d+)%/.exec(s.clipPath || '');
+        if (inset && +inset[1] >= 50) return false;
+        // Faded out by a filter, or its text pushed far off to the side.
+        var faded = /opacity\\(([\\d.]+)(%?)\\)/.exec(s.filter || '');
+        if (faded && +faded[1] / (faded[2] ? 100 : 1) < 0.1) return false;
+        if (parseFloat(s.textIndent) < -500) return false;
         var r = el.getBoundingClientRect();
         if ((r.width < 2 || r.height < 2) && s.overflow !== 'visible') return false;
         if (r.width < 1 && r.height < 1) return false;
@@ -249,7 +312,7 @@ enum AIPage {
       function unreadable(color, behind) {
         var c = rgb(color);
         if (!c || !behind) return false;
-        if (c.a < 0.1) return true;
+        if (c.a < 0.3) return true;
         var a = light(c), b = light(behind);
         return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 1.25;
       }
@@ -257,11 +320,14 @@ enum AIPage {
       var out = [], links = [];
       // `behind`: the colour behind this node, or null where a picture is
       // (text over an image can't be judged by colours alone).
-      function walk(node, behind) {
+      // `alpha`: how opaque it is through all its parents together.
+      function walk(node, behind, alpha) {
         if (seen++ > limit) return;
         if (node.nodeType === 3) {
           var t = node.nodeValue.replace(/\\s+/g, ' ');
-          if (t.trim() && !unreadable(getComputedStyle(node.parentElement).color, behind)) out.push(t);
+          var ps = getComputedStyle(node.parentElement);
+          var fill = rgb(ps.webkitTextFillColor);
+          if (t.trim() && !unreadable(ps.color, behind) && !(fill && fill.a < 0.3)) out.push(t);
           return;
         }
         if (node.nodeType !== 1 || skip[node.tagName.toUpperCase()]) return;
@@ -273,7 +339,9 @@ enum AIPage {
         else { var bg = rgb(s.backgroundColor); if (bg && bg.a > 0.5 && behind !== null) behind = bg; }
         var block = !/^inline/.test(s.display);
         if (block) out.push('\\n');
-        for (var c = node.firstChild; c; c = c.nextSibling) walk(c, behind);
+        alpha = alpha * (parseFloat(s.opacity) || 0);
+        if (alpha < 0.1) return;
+        for (var c = node.firstChild; c; c = c.nextSibling) walk(c, behind, alpha);
         if (block) out.push('\\n');
       }
 
@@ -296,7 +364,7 @@ enum AIPage {
         if (visible) links.push(a.href);
       }
       var heading = document.querySelector('h1');
-      walk(root, ground);
+      walk(root, ground, 1);
       var text = out.join('').replace(/[ \\t]+\\n/g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();
       return { title: document.title || (heading && heading.textContent.trim()) || '', text: text, links: links };
     })();

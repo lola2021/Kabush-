@@ -33,6 +33,7 @@
 
 #include <cstdio>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -106,8 +107,12 @@ static bool next_line(std::string & carry, std::string & line) {
     }
 }
 
-// A "stop" for `id` waiting on the input, looked at between tokens. Any
-// other line — the next request — is kept for later.
+// Requests called off before they began: skipped when their turn comes.
+static std::set<int> cancelled;
+
+// A "stop" for `id` waiting on the input, looked at between tokens. A stop
+// for a request still waiting is remembered; any other line — the next
+// request — is kept for later.
 static bool stopped(int id, std::string & carry) {
     if (!fill(carry, false)) return true;  // Search has gone: nobody to answer.
     std::string kept;
@@ -118,7 +123,9 @@ static bool stopped(int id, std::string & carry) {
         start = end + 1;
         json message = json::parse(line, nullptr, false);
         if (message.is_object() && message.contains("stop") && message["stop"].is_number_integer()) {
-            if (message["stop"].get<int>() == id) stop = true;
+            const int which = message["stop"].get<int>();
+            if (which == id) stop = true;
+            else if (cancelled.size() < 1024) cancelled.insert(which);
             continue;
         }
         kept += line + "\n";
@@ -165,8 +172,16 @@ int main(int argc, char ** argv) {
     while (true) {
         if (!next_line(carry, line)) break;
         json request = json::parse(line, nullptr, false);
+        if (request.is_object() && request.contains("stop") && request["stop"].is_number_integer()) {
+            if (cancelled.size() < 1024) cancelled.insert(request["stop"].get<int>());
+            continue;
+        }
         if (!request.is_object() || !request.contains("id") || !request["id"].is_number_integer()) continue;
         const int id = request["id"].get<int>();
+        if (cancelled.erase(id)) {
+            say({{"id", id}, {"done", true}, {"stopped", true}, {"prompt_tokens", 0}, {"tokens", 0}});
+            continue;
+        }
         if (!request.contains("messages") || !request["messages"].is_array()) {
             say({{"id", id}, {"error", "No messages."}});
             continue;

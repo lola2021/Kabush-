@@ -118,6 +118,9 @@ final class Assistant: ObservableObject, Identifiable {
                 for try await piece in stream {
                     guard let self, !self.turns.isEmpty else { return }
                     self.turns[self.turns.count - 1].answer += piece
+                    // Longer than any answer about a page needs: a model
+                    // talked into writing on and on is stopped.
+                    if self.turns[self.turns.count - 1].answer.count > Assistant.longest { break }
                 }
                 self?.finish(nil)
             } catch {
@@ -126,13 +129,23 @@ final class Assistant: ObservableObject, Identifiable {
         }
     }
 
+    static let longest = 16_000
+
     private func finish(_ failed: String?) {
         guard !turns.isEmpty, let read else { return }
         var turn = turns[turns.count - 1]
         turn.done = true
         turn.failed = failed
-        turn.strays = AIPage.strays(in: turn.answer, from: read)
         turns[turns.count - 1] = turn
+        // Checked away from the window's thread: a long answer is a long look.
+        let id = turn.id, answer = turn.answer
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let strays = AIPage.strays(in: answer, from: read)
+            await MainActor.run {
+                guard let self, let index = self.turns.firstIndex(where: { $0.id == id }) else { return }
+                self.turns[index].strays = strays
+            }
+        }
         if failed == nil, !turn.answer.isEmpty {
             messages.append(AIMessage(role: .assistant, text: turn.answer))
         } else if !messages.isEmpty {
@@ -179,8 +192,14 @@ extension Browser {
             announce(prefs.ai ? "Choose where the AI runs" : "Turn on AI in Settings › AI")
             return
         }
+        // A web page, nothing else: not a file, not an extension's page.
+        guard let scheme = tab.pageAddress?.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
+            announce("AI works on web pages")
+            return
+        }
         // A private tab leaves nothing behind anywhere, a provider included.
-        guard !tab.shy || provider.isLocal else {
+        let shy = tab.shy || tab.built.map { !$0.configuration.websiteDataStore.isPersistent } == true
+        guard !shy || provider.isLocal else {
             announce("In a private tab, only an AI on this Mac")
             return
         }
@@ -425,7 +444,11 @@ struct AISettings: View {
                         if provider == .thisMac { onThisMac } else if provider.isLocal { localModel(provider) } else { key(provider); Rule(); cloudModel(provider) }
                     }
                 }
-                .onChange(of: prefs.aiProvider) { _, _ in refresh() }
+                .onChange(of: prefs.aiProvider) { _, _ in
+                    // A key typed for one provider is never saved for another.
+                    pasted = ""
+                    refresh()
+                }
                 .onAppear(perform: refresh)
                 Card {
                     Line("Forget every key", "Deletes them from this Mac's keychain. A key made by signing in with OpenRouter still works until you delete it on openrouter.ai") {

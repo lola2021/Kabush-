@@ -15,8 +15,14 @@ import Foundation
 //     or it isn't started at all;
 //   - the model's size and SHA-256 are pinned here, and checked on the very
 //     file the engine gets: Search opens it, hashes what it opened, and hands
-//     that open file over (descriptor 3), so nothing can be swapped in
-//     between. The engine can read nothing else.
+//     that open file over (descriptor 3), so another file can't be put in its
+//     place. (Something already able to write to Search's folder could still
+//     change the file itself afterwards; what it reaches then is the engine,
+//     inside its sandbox.) The engine can read nothing else;
+//   - the engine is started suspended, checked again as the process it now
+//     is — its signature, identifier and entitlements, as the system loaded
+//     them, so a file swapped after the first check is caught — and only
+//     then let run, answerable for itself rather than as Search.
 // It is started with nothing of Search's: no other descriptor, no
 // environment. It is stopped after five idle minutes, giving its memory back.
 
@@ -190,6 +196,7 @@ final class AIEngine: ObservableObject {
         installing?.cancel()
         try? FileManager.default.removeItem(at: AIEngine.folder.appendingPathComponent("Models"))
         try? FileManager.default.removeItem(at: AIEngine.engines)
+        try? FileManager.default.removeItem(at: AIEngine.folder.appendingPathComponent("Downloads"))
         state = .absent
     }
 
@@ -268,9 +275,24 @@ final class AIEngine: ObservableObject {
         var errorDescription: String? { why }
     }
 
+    /// One start at a time: a second question while the model is being
+    /// checked waits for the same start.
+    private var starting: Task<Void, Error>?
+    /// Which run of the engine is the current one: a run that has ended can
+    /// still have words on their way, and they are for nobody.
+    private var generation = 0
+
     /// The engine, running and loaded. Started if it isn't.
     private func start() async throws {
         if ready, pid != 0 { return }
+        if let starting { return try await starting.value }
+        let task = Task { @MainActor in try await self.launch() }
+        starting = task
+        defer { starting = nil }
+        try await task.value
+    }
+
+    private func launch() async throws {
         if pid == 0 {
             guard let engine = engineFile else { throw Stopped(why: "The engine isn't installed.") }
             let modelURL = AIEngine.modelFile
@@ -287,6 +309,12 @@ final class AIEngine: ObservableObject {
             }
             defer { close(modelFD) }
             try spawn(engine, modelFD: modelFD)
+        }
+        // Two minutes to get ready: the first start compiles for this Mac.
+        let run = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+            guard let self, self.generation == run, self.pid != 0, !self.ready else { return }
+            self.ended("The engine didn't start.")
         }
         try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<Void, Error>) in
             if ready { waiter.resume() } else { readyWaiters.append(waiter) }
@@ -309,8 +337,11 @@ final class AIEngine: ObservableObject {
         posix_spawn_file_actions_adddup2(&actions, fromEngine.fileHandleForWriting.fileDescriptor, 1)
         posix_spawn_file_actions_adddup2(&actions, null, 2)
         posix_spawn_file_actions_adddup2(&actions, modelFD, 3)
-        // Only those four: nothing else Search has open goes with it.
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT))
+        // Only those four: nothing else Search has open goes with it. Held
+        // before its first instruction, to be checked as it is loaded; and
+        // answerable for itself, not as Search, with anything macOS asks.
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_START_SUSPENDED))
+        if let disclaim = AIEngine.disclaim { _ = disclaim(&attributes, 1) }
         let arguments = [engine.path, "--context", "8192"]
         var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
@@ -320,17 +351,62 @@ final class AIEngine: ObservableObject {
         toEngine.fileHandleForReading.closeFile()
         fromEngine.fileHandleForWriting.closeFile()
         guard status == 0 else { throw Stopped(why: "The engine couldn't be started.") }
+        // The process as the system loaded it, before it runs a thing.
+        guard AIEngine.trustedRunning(child) else {
+            kill(child, SIGKILL)
+            var reaped: Int32 = 0
+            waitpid(child, &reaped, 0)
+            throw Stopped(why: "The engine's signature doesn't hold up. Remove it in Settings › AI and download it again.")
+        }
+        kill(child, SIGCONT)
         pid = child
+        generation += 1
+        let run = generation
+        // A write to an engine that has just died fails, rather than taking
+        // Search down with it.
+        _ = fcntl(toEngine.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         input = toEngine.fileHandleForWriting
         output = fromEngine.fileHandleForReading
         carry = Data()
         output?.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            DispatchQueue.main.async { self?.heard(data) }
+            DispatchQueue.main.async { self?.heard(data, run: run) }
         }
     }
 
-    private func heard(_ data: Data) {
+    /// responsibility_spawnattrs_setdisclaim, where the system has it.
+    nonisolated(unsafe) private static let disclaim: (@convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32)? = {
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim") else { return nil }
+        return unsafeBitCast(symbol, to: (@convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32).self)
+    }()
+
+    /// The started engine, checked as a running process: the same
+    /// requirement and entitlements as the file (see `trusted`).
+    nonisolated static func trustedRunning(_ pid: pid_t) -> Bool {
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: pid] as CFDictionary, [], &code) == errSecSuccess,
+              let code
+        else { return false }
+        var requirement: SecRequirement?
+        if Store.testing {
+            SecRequirementCreateWithString("identifier \"\(identifier)\"" as CFString, [], &requirement)
+        } else {
+            requirement = Updater.developerID(team: Updater.team, identifier: identifier)
+        }
+        guard let requirement, SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { return false }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return false }
+        var info: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSRequirementInformation | kSecCSSigningInformation), &info) == errSecSuccess,
+              let signing = info as? [String: Any],
+              let entitlements = signing[kSecCodeInfoEntitlementsDict as String] as? [String: Any],
+              entitlements["com.apple.security.app-sandbox"] as? Bool == true
+        else { return false }
+        return entitlements.keys.allSatisfy { $0 == "com.apple.security.app-sandbox" }
+    }
+
+    private func heard(_ data: Data, run: Int) {
+        guard run == generation else { return }
         guard !data.isEmpty else { return ended("The engine stopped.") }
         carry.append(data)
         while let end = carry.firstIndex(of: 0x0A) {
@@ -366,6 +442,7 @@ final class AIEngine: ObservableObject {
         }
         pid = 0
         ready = false
+        generation += 1
         input = nil
         output = nil
         readyWaiters.forEach { $0.resume(throwing: Stopped(why: why)) }

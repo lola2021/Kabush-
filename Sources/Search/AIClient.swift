@@ -147,6 +147,9 @@ final class AIClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             ]
             // Only providers that keep nothing of the request.
             if provider == .openRouter { body["provider"] = ["zdr": true] }
+            // A limit on the answer, for every one: OpenAI's own models take
+            // it under its newer name.
+            body[provider == .openAI ? "max_completion_tokens" : "max_tokens"] = 2048
         case .anthropic:
             url = provider.base.appendingPathComponent("messages")
             body = [
@@ -163,6 +166,7 @@ final class AIClient: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
             body = [
                 "systemInstruction": ["parts": [["text": system]]],
                 "contents": messages.map { ["role": $0.role == .user ? "user" : "model", "parts": [["text": $0.text]]] },
+                "generationConfig": ["maxOutputTokens": 2048],
             ]
         }
         guard allowed(url, for: provider) else { throw AIError.refusedHost }
