@@ -2281,6 +2281,7 @@ final class Browser: NSObject, ObservableObject {
             activeID = blank.id
             summoning = false
             typed = ""
+            blank.draft = ""
             editing = false
             focusRequest += 1
             rememberSession()
@@ -2327,6 +2328,9 @@ final class Browser: NSObject, ObservableObject {
         }
         // A peek is over the tab it was opened from; another tab puts it away.
         if peekTab != nil, tab.id != activeID { closePeek() }
+        // Before ⌘K is put away below: its words were for finding a tab, not
+        // a draft for the blank one it was pressed on.
+        if tab.id != activeID, !summoning, let here = active, here.isBlank { here.draft = typed }
         cancelTabEdit()
         summoning = false
         suggesting = nil
@@ -2351,7 +2355,7 @@ final class Browser: NSObject, ObservableObject {
            !other.isBlank, !other.wake() { other.revive() }
         rememberSession()
         editing = false
-        typed = ""
+        typed = tab.isBlank ? tab.draft : ""
     }
 
     /// ⌘W, or the cross on the tab. Closing the last one leaves a blank tab
@@ -3004,6 +3008,7 @@ final class Browser: NSObject, ObservableObject {
             activeID = blank.id
             summoning = false
             typed = ""
+            blank.draft = ""
             editing = false
             focusRequest += 1
             return

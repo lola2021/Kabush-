@@ -40,6 +40,7 @@ in [ROADMAP.md](ROADMAP.md).
 - A pinned tab you drag to another place keeps up with the pointer, as a tab does: each move of the hand redrew the whole column.
 - Tampermonkey installs a script from a link on Greasy Fork, OpenUserJS, GitHub, GitLab and the other script sites it knows, as in Chrome: the rules it catches those links with weren't in a form WebKit takes, so none of them loaded. A .user.js link anywhere else still needs the script pasted into its editor, since WebKit can't hold that one rule beside the others.
 - Escape on a new tab you haven't typed in or gone anywhere from closes it and takes you back to the tab you were on, as if the ⌘T hadn't happened. Anything typed keeps it, and so does it being the only tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#393](https://github.com/driceroland/Search/pull/393), [#389](https://github.com/driceroland/Search/issues/389))
+- Words typed into a new tab's address field and not yet sent are still there when you come back to it from another tab, with the cursor after them. They are kept in memory only, and go once you send them or close the tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#394](https://github.com/driceroland/Search/pull/394), [#390](https://github.com/driceroland/Search/issues/390))
 
 ## 1.0.4 — 27 September 2026
 
