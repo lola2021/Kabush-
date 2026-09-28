@@ -38,6 +38,17 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// The popup's web view, while one is up — for the bench.
     var view: WKWebView? { web }
 
+    /// The popup asking for the camera or microphone: asked on the card of
+    /// the window in front, named as the extension and remembered for it,
+    /// as for any of its pages (see Browser.askedForCapture) — never
+    /// WebKit's own dialog, and never without asking.
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        guard let browser = Browsers.front else { return decisionHandler(.deny) }
+        browser.askedForCapture(webView, origin: origin, frame: frame, type: type, decisionHandler: decisionHandler)
+    }
+
     /// On screen now.
     var isUp: Bool { popover?.isShown == true }
 

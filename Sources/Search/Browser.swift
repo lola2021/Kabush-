@@ -4101,13 +4101,31 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         type: WKMediaCaptureType,
         decisionHandler: @escaping (WKPermissionDecision) -> Void
     ) {
-        let host = origin.host.isEmpty ? (tab(for: webView)?.address?.host() ?? "This page") : origin.host
-        // Remembered for the origin that asked — http://site and
-        // https://site, or another port, are other sites — and never for a
-        // private tab, which leaves nothing behind.
-        let site = origin.host.isEmpty ? host : "\(origin.protocol)://\(origin.host)" + (origin.port == 0 ? "" : ":\(origin.port)")
+        askedForCapture(webView, origin: origin, frame: frame, type: type, decisionHandler: decisionHandler)
+    }
+
+    /// The camera or microphone, for a tab's page or an extension's popup.
+    ///
+    /// Remembered for the origin that asked — http://site and https://site,
+    /// or another port, are other sites — and never for a private tab, which
+    /// leaves nothing behind. An extension's page asking — its popup, or a
+    /// frame of its own inside a website (a recorder's camera bubble) — is
+    /// named as the extension and remembered for it, never for the site it
+    /// sits in: allowing the bubble must not give the site the camera.
+    func askedForCapture(_ webView: WKWebView, origin: WKSecurityOrigin, frame: WKFrameInfo, type: WKMediaCaptureType,
+                         decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        let asker = frame.securityOrigin
+        let host: String
+        let site: String
+        if Browser.extensionScheme(asker.protocol) {
+            host = Browser.extensionName(asker.host)
+            site = "\(asker.protocol.lowercased())://\(asker.host.lowercased())"
+        } else {
+            host = origin.host.isEmpty ? (tab(for: webView)?.address?.host() ?? "This page") : origin.host
+            site = origin.host.isEmpty ? host : "\(origin.protocol)://\(origin.host)" + (origin.port == 0 ? "" : ":\(origin.port)")
+        }
         let key = "\(site)|\(type.rawValue)"
-        let shy = tab(for: webView)?.shy ?? false
+        let shy = tab(for: webView).map { $0.shy || !webView.configuration.websiteDataStore.isPersistent } ?? false
 
         if !shy, let remembered = Store.settings.object(forKey: "capture." + key) as? Bool {
             decisionHandler(remembered ? .grant : .deny)
@@ -4125,6 +4143,19 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             askedAbout = shy ? "" : key
             asking = CaptureAsk(host: host, wants: Browser.name(for: type))
         }, drop: { decisionHandler(.deny) })
+    }
+
+    /// An extension's own scheme, today's or the one it had before.
+    static func extensionScheme(_ scheme: String) -> Bool {
+        ["chrome-extension", "webkit-extension"].contains(scheme.lowercased())
+    }
+
+    /// An extension by the name it shows, for a question it asks.
+    static func extensionName(_ id: String) -> String {
+        if #available(macOS 15.4, *), let found = Extensions.shared.installed.first(where: { $0.id.lowercased() == id.lowercased() }) {
+            return found.name
+        }
+        return "An extension"
     }
 
     /// A page asking where you are. WebKit asks this through a delegate
@@ -4165,7 +4196,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         guard decide == nil else { return give(.deny) }
         decide = give
         askedAbout = tab.shy ? "" : key
-        asking = CaptureAsk(host: origin.host, wants: "location", once: true, keeps: !tab.shy)
+        let named = Browser.extensionScheme(origin.protocol) ? Browser.extensionName(origin.host) : origin.host
+        asking = CaptureAsk(host: named, wants: "location", once: true, keeps: !tab.shy)
     }
 
     /// A page asking to send notifications. Asked over its own page, as the
