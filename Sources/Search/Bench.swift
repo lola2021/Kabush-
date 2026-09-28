@@ -2414,6 +2414,10 @@ final class Bench {
             browser.writeSession(now: true)
             reply()
 
+        case "closeOthers":
+            guard let page = tab() else { answer(["error": "split closeOthers needs id"]); return }
+            browser.closeOthers(but: page)
+            reply()
         case "swap": browser.swapSplit(); reply()
         case "even": browser.evenSplit(); reply()
         case "closeBoth": browser.closeSplit(); reply()
@@ -2472,6 +2476,10 @@ final class Bench {
             "groups": browser.tabGroups.map { ["id": $0.id.uuidString, "collapsed": $0.collapsed] as [String: Any] },
             "groupIDs": browser.tabs.map { $0.groupID?.uuidString ?? "" },
             "enabled": browser.prefs.splitView,
+            "finding": browser.finding,
+            "needle": browser.needle,
+            "findStatus": browser.findStatus ?? "",
+            "pins": browser.tabs.filter { $0.pin != nil }.map { Bench.short($0) },
             "paneFrames": browser.tabs.compactMap { tab -> [String: Any]? in
                 guard let web = tab.built, let window = browser.window, web.window === window else { return nil }
                 let frame = web.convert(web.bounds, to: nil)

@@ -80,8 +80,9 @@ private struct PaneLayers: View {
             }
         }
         .overlay {
-            if browser.prefs.showsLinks, focused {
-                LinkBubble(status: browser.linkStatus)
+            // Over the page the link is on, focused or not.
+            if browser.prefs.showsLinks {
+                LinkBubble(status: browser.linkStatus, page: paired ? tab.built : nil)
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -152,7 +153,7 @@ private struct OpenTabs: View {
         let pair = browser.split(for: blank)
         return browser.tabs
             .filter { tab in
-                tab.id != blank.id && pair?.contains(tab.id) != true && tab.pin == nil && !tab.bench
+                tab.id != blank.id && pair?.contains(tab.id) != true && !tab.bench
                     && !tab.isBlank && tab.shy == blank.shy
             }
             .sorted { $0.touched > $1.touched }

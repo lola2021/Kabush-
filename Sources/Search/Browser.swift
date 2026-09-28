@@ -2020,19 +2020,32 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - tabs
 
-    /// A pin keeps its place among the pins, in every window (see Pins.swift),
-    /// so it stays out of a pair: unpinned first, by hand, it can go in.
+    /// A pin can be split with: its page goes into the pair as a tab of its
+    /// own, and the pin stays where it is (see splittable).
     func canSplit(_ first: Tab, with second: Tab) -> Bool {
         prefs.splitView && first.id != second.id && !first.bench && !second.bench
-            && first.pin == nil && second.pin == nil
             && first.shy == second.shy
             && tabs.contains(where: { $0.id == first.id })
             && tabs.contains(where: { $0.id == second.id })
     }
 
+    /// Zen's rule for pins: a pin never goes into a pair — it keeps its
+    /// place among the pins, in every window (Pins.swift) — but its page
+    /// does, as a new tab beside the other page. Anything else is itself.
+    private func splittable(_ tab: Tab) -> Tab {
+        guard tab.pin != nil, let url = tab.address ?? tab.home else { return tab }
+        let copy = Tab(configuration: Web.configuration(space: spaceID))
+        prepare(copy)
+        tabs.insert(copy, at: tabs.count)
+        copy.go(to: url)
+        return copy
+    }
+
     func pair(_ dragged: Tab, with target: Tab, onLeft: Bool) {
         guard canSplit(dragged, with: target) else { return }
         if floating == dragged.id || floating == target.id { land() }
+        let dragged = splittable(dragged)
+        let target = splittable(target)
         detachSplit(dragged)
         detachSplit(target)
         let oldGroup = dragged.groupID
@@ -2053,16 +2066,13 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func startSplit() {
-        guard prefs.splitView, let current = active, !current.bench else { return }
+        guard prefs.splitView, let shown = active, !shown.bench else { return }
         if let pair = activeSplit {
             if let right = tabs.first(where: { $0.id == pair.right }) { focusPane(right) }
             return
         }
-        guard current.pin == nil else {
-            announce("Unpin the tab to split it")
-            return
-        }
-        if floating == current.id { land() }
+        if floating == shown.id { land() }
+        let current = splittable(shown)
         let right = Tab(shy: current.shy,
                         configuration: current.shy ? Web.configuration(shy: true, store: current.store)
                             : Web.configuration(space: spaceID))
@@ -2099,7 +2109,8 @@ final class Browser: NSObject, ObservableObject {
         if let pair = split(for: tab), activeSplit?.id == pair.id {
             guard activeID != tab.id else { return }
             if peekTab != nil { closePeek() }
-            closeFind()
+            // Find stays open with what it was looking for, and looks in
+            // this page instead (see activeID).
             cancelTabEdit()
             summoning = false
             suggesting = nil
@@ -2127,10 +2138,7 @@ final class Browser: NSObject, ObservableObject {
         guard prefs.splitView, let current = active else { return }
         if tab.id == current.id { return startSplit() }
         guard split(for: tab)?.contains(current.id) != true else { return focusPane(tab) }
-        guard canSplit(tab, with: current) else {
-            if tab.pin != nil || current.pin != nil { announce("Unpin the tab to split it") }
-            return
-        }
+        guard canSplit(tab, with: current) else { return }
         pair(tab, with: current, onLeft: false)
     }
 
@@ -2164,8 +2172,9 @@ final class Browser: NSObject, ObservableObject {
     /// and the empty one goes. Chosen from the list the empty page shows.
     func fill(_ blank: Tab, with tab: Tab) {
         guard let pair = split(for: blank), blank.isBlank, tab.id != blank.id, !pair.contains(tab.id),
-              tab.pin == nil, !tab.bench, tab.shy == blank.shy,
+              !tab.bench, tab.shy == blank.shy,
               let at = tabs.firstIndex(where: { $0.id == blank.id }) else { return }
+        let tab = splittable(tab)
         detachSplit(tab)
         let oldGroup = tab.groupID
         tab.groupID = blank.groupID
@@ -2399,7 +2408,8 @@ final class Browser: NSObject, ObservableObject {
     func closeOthers(but keep: Tab) {
         select(keep)
         // The list is read once: closing walks the row and can add to it.
-        for tab in tabs.filter({ $0.id != keep.id }) {
+        let partner = split(for: keep).flatMap { $0.partner(of: keep.id) }
+        for tab in tabs.filter({ $0.id != keep.id && $0.id != partner }) {
             close(tab)
         }
         select(keep)
@@ -2513,12 +2523,15 @@ final class Browser: NSObject, ObservableObject {
               let destination = spaces.first(where: { $0.id == id }),
               let index = tabs.firstIndex(where: { $0.id == tab.id })
         else { return false }
+        let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
 
         if floating == tab.id { land() }
         if editingTab == tab.id { cancelTabEdit() }
         if activeID == tab.id {
-            if tabs.count > 1 {
+            if let partner {
+                select(partner, floatPrevious: false)
+            } else if tabs.count > 1 {
                 select(tabs[index == tabs.count - 1 ? index - 1 : index + 1], floatPrevious: false)
             } else {
                 activeID = nil
@@ -2588,11 +2601,14 @@ final class Browser: NSObject, ObservableObject {
     /// Out of this row, not closed: it is on its way to another window.
     private func detach(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
         if floating == tab.id { land() }
         if editingTab == tab.id { cancelTabEdit() }
         if activeID == tab.id {
-            if tabs.count > 1 {
+            if let partner {
+                select(partner, floatPrevious: false)
+            } else if tabs.count > 1 {
                 select(tabs[index == tabs.count - 1 ? index - 1 : index + 1], floatPrevious: false)
             } else {
                 activeID = nil
@@ -3119,8 +3135,15 @@ final class Browser: NSObject, ObservableObject {
     /// Stepping away from a tab. A video you were watching does not stop
     /// existing because you went to look something up.
     private func leaving() {
-        guard prefs.floatsOnLeave, activeSplit == nil else { return }
-        lift(active, quietly: true)
+        guard prefs.floatsOnLeave else { return }
+        lift(active, quietly: true, otherwise: otherPane)
+    }
+
+    /// With a pair on screen, its other page: what floats when the focused
+    /// one has nothing playing.
+    private var otherPane: Tab? {
+        guard let pair = activeSplit, let id = activeID else { return nil }
+        return tabs.first { $0.id == pair.partner(of: id) }
     }
 
     /// Another app in front: the video comes along, as in Arc (Settings ›
@@ -3131,7 +3154,7 @@ final class Browser: NSObject, ObservableObject {
     func appLeft() {
         guard prefs.floatsAway, Browsers.front == nil || Browsers.front === self else { return }
         liftedAway = !floater.showing
-        lift(active, quietly: true)
+        lift(active, quietly: true, otherwise: otherPane)
     }
 
     /// Back, and still on the tab it came from: into the tab again.
@@ -3146,15 +3169,20 @@ final class Browser: NSObject, ObservableObject {
             land()
             return
         }
-        lift(active, quietly: false)
+        lift(active, quietly: false, otherwise: otherPane)
     }
 
     /// Everything but the video goes out of the way, and the page it lives in
     /// moves house — into a small window that stays above everything.
-    private func lift(_ tab: Tab?, quietly: Bool) {
+    /// `otherwise`: the other page of a pair, tried when this one has
+    /// nothing playing.
+    private func lift(_ tab: Tab?, quietly: Bool, otherwise: Tab? = nil) {
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
-        guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else { return }
+        guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else {
+            if let otherwise { lift(otherwise, quietly: quietly) }
+            return
+        }
         // A video filling the screen stays in its own space, as in Safari.
         // Its page is lent to WebKit's full-screen window, and moving it out
         // into the floating one left that window up, empty and black, to
@@ -3163,11 +3191,15 @@ final class Browser: NSObject, ObservableObject {
         // On its own, only from a site whose video is the point of the site.
         // A hero background on a studio's home page is a video too, and it
         // followed people around the desktop. ⌘⇧P still lifts from anywhere.
-        if quietly, !Players.knows(tab.address) { return }
+        if quietly, !Players.knows(tab.address) {
+            if let otherwise { lift(otherwise, quietly: quietly) }
+            return
+        }
         tab.web.evaluateInSearch(Isolate.on) { [weak self] answer in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard (answer as? String) == "floating" else {
+                    if let otherwise { return self.lift(otherwise, quietly: quietly) }
                     if !quietly { self.announce("Nothing is playing here") }
                     return
                 }
@@ -3198,7 +3230,7 @@ final class Browser: NSObject, ObservableObject {
     func prepare(_ tab: Tab) {
         tab.delegate = self
         tab.onLink = { [weak self] tab, address in
-            guard let self, prefs.showsLinks, tab.id == activeID else { return }
+            guard let self, prefs.showsLinks, visibleTabIDs.contains(tab.id) else { return }
             linkStatus.show(address, over: tab.built)
         }
         tab.onPick = { [weak self] tab, selector, label, note in
@@ -3487,7 +3519,7 @@ final class Browser: NSObject, ObservableObject {
             summoning = false
             // From the empty page of a pair: that tab comes into the pair.
             if let blank = active, blank.isBlank, split(for: blank) != nil, !aside,
-               tab.pin == nil, tab.shy == blank.shy, split(for: tab)?.contains(blank.id) != true {
+               tab.shy == blank.shy, split(for: tab)?.contains(blank.id) != true {
                 fill(blank, with: tab)
                 return
             }
