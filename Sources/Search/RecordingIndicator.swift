@@ -180,8 +180,10 @@ struct PillView: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(indicator.lines) { line in
                 HStack(spacing: 8) {
+                    // The pill's one colour: a recording is known at a
+                    // glance by its red dot, as in Chrome and Loom.
                     Circle()
-                        .fill(Palette.ink.opacity(0.75))
+                        .fill(Color(nsColor: .systemRed))
                         .frame(width: 7, height: 7)
                     (Text(line.name).font(.system(size: 12.5, weight: .semibold))
                         + Text(" \(line.what)").font(.system(size: 12.5)))
