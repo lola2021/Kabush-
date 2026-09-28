@@ -456,16 +456,19 @@ struct BookmarkOutline: View {
         VStack(alignment: .leading, spacing: 1) {
             rows(bookmarks.roots, depth: 0, parent: nil)
             // Past the last row: the end of the top level, which "after" on
-            // an open folder at the bottom can't reach.
-            Color.clear
-                .frame(height: 10)
-                .overlay(alignment: .top) { if aimed == Aim(id: nil, zone: .after) { Line(depth: 0) } }
-                .modifier(Landing(
-                    isFolder: false,
-                    allowed: { true },
-                    aim: { aim($0.map { _ in Aim(id: nil, zone: .after) }) },
-                    land: { _, providers in drop(providers) { bookmarks.move($0, into: nil) } }
-                ))
+            // an open folder at the bottom can't reach. Only there while a
+            // row is carried, or it is an empty band under the list (#391).
+            if dragging != nil {
+                Color.clear
+                    .frame(height: 10)
+                    .overlay(alignment: .top) { if aimed == Aim(id: nil, zone: .after) { Line(depth: 0) } }
+                    .modifier(Landing(
+                        isFolder: false,
+                        allowed: { true },
+                        aim: { aim($0.map { _ in Aim(id: nil, zone: .after) }) },
+                        land: { _, providers in drop(providers) { bookmarks.move($0, into: nil) } }
+                    ))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -477,6 +480,9 @@ struct BookmarkOutline: View {
             Row(
                 node: node,
                 depth: depth,
+                // A folder's arrow has a place in front of every row, so the
+                // icons line up; with no folder at all, it is only a gap.
+                arrows: bookmarks.roots.contains(where: \.isFolder),
                 // An extension can write an address that does not parse,
                 // and the menu below already unwraps this the same way.
                 open: node.isFolder ? nil : { if let text = node.url, let url = URL(string: text) { open(url) } },
@@ -501,6 +507,7 @@ struct BookmarkOutline: View {
             }
             .onDrag {
                 dragging = node.id
+                settleWhenLetGo()
                 return NSItemProvider(object: node.id.uuidString as NSString)
             }
             .modifier(Landing(
@@ -577,6 +584,25 @@ struct BookmarkOutline: View {
         let work = DispatchWorkItem { withAnimation(Motion.settle) { _ = expanded.wrappedValue.insert(id) } }
         spring = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
+    }
+
+    /// SwiftUI says when a row lands on the list, not when it is let go
+    /// anywhere else or the drag is called off, which left the line where
+    /// it was last aimed and the row faded (#391). The button coming up says
+    /// it: looked at a few times a second, which a drag's own loop holds
+    /// back until it is over.
+    private func settleWhenLetGo() {
+        let aimed = $aimed, dragging = $dragging, spring = $spring
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            timer.invalidate()
+            MainActor.assumeIsolated {
+                spring.wrappedValue?.cancel()
+                spring.wrappedValue = nil
+                aimed.wrappedValue = nil
+                dragging.wrappedValue = nil
+            }
+        }
     }
 
     private func drop(_ providers: [NSItemProvider], then move: @escaping (Bookmark.ID) -> Void) -> Bool {
@@ -661,6 +687,7 @@ struct BookmarkOutline: View {
     private struct Row: View {
         let node: Bookmark
         let depth: Int
+        let arrows: Bool
         /// Nil for a folder — folders open in place, not out to a page.
         let open: (() -> Void)?
         let isOpen: Bool
@@ -693,7 +720,7 @@ struct BookmarkOutline: View {
                                 .foregroundStyle(Palette.muted)
                         )
                 } else {
-                    Spacer().frame(width: 10)
+                    if arrows { Spacer().frame(width: 10) }
                     Mark(icon: Favicons.shared.cached(node.host ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 15)
                 }
                 Text(node.title)

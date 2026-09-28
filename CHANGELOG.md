@@ -48,6 +48,7 @@ in [ROADMAP.md](ROADMAP.md).
 - Words typed into a new tab's address field and not yet sent are still there when you come back to it from another tab, with the cursor after them. They are kept in memory only, and go once you send them or close the tab. Thanks [@bhanni01](https://github.com/bhanni01) ([#394](https://github.com/driceroland/Search/pull/394), [#390](https://github.com/driceroland/Search/issues/390))
 - An extension page shown inside a website can run a function in a tab with scripting.executeScript, as in Chrome: the function was lost on its way to the extension's worker, and the call refused. Aino's web clipper works again. Thanks [@quanru](https://github.com/quanru) ([#403](https://github.com/driceroland/Search/pull/403))
 - SingleFile saves pages again: its worker failed as it started, and a file it made in its worker couldn't be downloaded. Thanks [@quanru](https://github.com/quanru) ([#405](https://github.com/driceroland/Search/pull/405))
+- The bookmarks list lines up again, in the dropdown and in the manager. With no folders, each bookmark kept an empty place for a folder's arrow in front of it, and an empty band sat under the last one. The line showing where a dragged bookmark would go no longer stays behind once it is let go somewhere else. Thanks [@tomaswarynyca](https://github.com/tomaswarynyca) for reporting ([#391](https://github.com/driceroland/Search/issues/391))
 
 ## 1.0.4 — 27 September 2026
 
