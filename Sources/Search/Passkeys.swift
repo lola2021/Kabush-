@@ -935,9 +935,14 @@ final class PasskeyRelay: NSObject, WKScriptMessageHandlerWithReply {
       function aborted(signal) {
         return signal.reason !== undefined ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
       }
+      // Data as read-only, as a native credential's are; methods (`hidden`)
+      // writable, as a native credential's are on its prototype — libraries
+      // put their own on the object: GitHub's webauthn-json sets toJSON on
+      // what get() returns, which a read-only one turned into a TypeError
+      // after the Mac's sheet (#407).
       function define(target, values, hidden) {
         Object.keys(values).forEach(function (k) {
-          Object.defineProperty(target, k, { value: values[k], enumerable: !hidden, configurable: true });
+          Object.defineProperty(target, k, { value: values[k], enumerable: !hidden, configurable: true, writable: !!hidden });
         });
         return target;
       }
