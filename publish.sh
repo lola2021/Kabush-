@@ -45,6 +45,18 @@ xcrun stapler validate -q "$FROM/Search.dmg" >/dev/null 2>&1 \
   || echo "note: $FROM/Search.dmg is not notarised — ./build.sh release ship does that" >&2
 
 mkdir -p "$FOLDER"
+# The AI engine the feed names, when it names one (build.sh, write_engine):
+# only a file whose hash is the one in the feed.
+ENGINEURL="$(python3 -c 'import json,sys; e=json.load(open(sys.argv[1])).get("ai",{}).get("engine"); print(e["url"] if e else "")' "$FROM/appcast.json")"
+if [ -n "$ENGINEURL" ]; then
+  ENGINEFILE="$FROM/ai/$(basename "$ENGINEURL")"
+  WANT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["ai"]["engine"]["sha256"])' "$FROM/appcast.json")"
+  [ -f "$ENGINEFILE" ] && [ "$(shasum -a 256 "$ENGINEFILE" | cut -d' ' -f1)" = "$WANT" ] \
+    || { echo "the engine the feed names isn't $ENGINEFILE with its hash — not publishing" >&2; exit 1; }
+  mkdir -p "$FOLDER/ai"
+  cp "$ENGINEFILE" "$FOLDER/ai/"
+  echo "copied: $ENGINEFILE → $FOLDER/ai/"
+fi
 for FILE in "${FILES[@]}"; do
   cp "$FROM/$FILE" "$FOLDER/$FILE"
   echo "copied: $FROM/$FILE → $FOLDER/$FILE"

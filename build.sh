@@ -279,9 +279,31 @@ if [ -f NOTES.md ]; then
   NOTES="$(awk 'NF { printf "%s%s", (n++ ? " " : ""), $0; next } n { exit }' NOTES.md \
     | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
 fi
+# The AI add-on's engine (engine.sh), when this release offers one: Apple
+# Silicon only for now. SEARCH_AI_ENGINE_VERSION names it — a number that
+# only goes up, as Search never takes a lower one — and the signed,
+# notarised binary in build/engine/ goes beside the other files, under ai/,
+# with its hash and size in the feed. The feed's own signature is what
+# vouches for them; Search then checks the engine's signature itself.
+AIBLOCK=""
+write_engine() {
+  local ENGINE="build/engine/search-ai-engine-arm64"
+  [ "$ARCH" = "arm64" ] && [ -n "${SEARCH_AI_ENGINE_VERSION:-}" ] || return 0
+  [[ "$SEARCH_AI_ENGINE_VERSION" =~ ^[0-9]+$ ]] || { echo "SEARCH_AI_ENGINE_VERSION is a whole number" >&2; exit 1; }
+  [ -f "$ENGINE" ] || { echo "$ENGINE is missing — ./engine.sh arm64 makes it" >&2; exit 1; }
+  codesign --verify --strict -R='anchor apple generic and identifier "com.officecommun.search.ai-engine" and certificate leaf[subject.OU] = "7BYKA895MC"' "$ENGINE" \
+    || { echo "$ENGINE isn't signed with the Developer ID as com.officecommun.search.ai-engine" >&2; exit 1; }
+  local FILE="search-ai-engine-arm64-$SEARCH_AI_ENGINE_VERSION"
+  mkdir -p "$OUT/ai"
+  cp "$ENGINE" "$OUT/ai/$FILE"
+  AIBLOCK=",
+  \"ai\": {\"engine\": {\"version\": $SEARCH_AI_ENGINE_VERSION, \"url\": \"$BASE/ai/$FILE\", \"sha256\": \"$(shasum -a 256 "$ENGINE" | cut -d' ' -f1)\", \"size\": $(stat -f%z "$ENGINE")}}"
+  echo "engine: $OUT/ai/$FILE"
+}
 write_appcast() {
   local DMGSHA
   DMGSHA="$(shasum -a 256 "$DMG" | cut -d' ' -f1)"
+  write_engine
   cat > "$OUT/appcast.json" <<JSON
 {
   "version": "$VERSION",
@@ -291,7 +313,7 @@ write_appcast() {
   "sha256": "$SHA",
   "dmgSha256": "$DMGSHA",
   "notes": "$NOTES",
-  "minimumSystemVersion": "$MINIMUM"
+  "minimumSystemVersion": "$MINIMUM"$AIBLOCK
 }
 JSON
   echo "wrote: $OUT/appcast.json ($VERSION, $ARCH, build $BUILD)"
