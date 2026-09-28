@@ -891,6 +891,23 @@ final class Bench {
                 next(0)
             }
 
+        case "switcher":
+            // The ⌃Tab switcher as it stands: up or not, the pick, and where
+            // the panel and each card are in the window (top-left points).
+            let sw = browser.tabSwitcher
+            func short(_ id: Tab.ID?) -> String {
+                guard let id, let tab = browser.tabs.first(where: { $0.id == id }) else { return "" }
+                return Bench.short(tab)
+            }
+            func box(_ r: CGRect) -> [Double] { [r.minX, r.minY, r.width, r.height].map { Double($0) } }
+            answer([
+                "visible": sw.visible, "selected": short(sw.selectedID),
+                "candidates": sw.candidates.map { short($0) },
+                "panel": box(sw.panelFrame),
+                "cards": Dictionary(sw.cardFrames.map { (short($0.key), box($0.value)) }, uniquingKeysWith: { a, _ in a }),
+                "active": short(browser.activeID),
+            ])
+
         case "recording":
             // The recording pill (RecordingIndicator.swift): lines put up as
             // ExtensionCapture would, a page lent to it, what it shows, and a
