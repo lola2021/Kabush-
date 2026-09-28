@@ -162,7 +162,6 @@ enum Browsers {
 
     /// A window around `browser`, made here rather than by SwiftUI.
     static func open(_ browser: Browser, frame: NSRect?) {
-        register(browser)
         let popup = browser.extensionPopup != nil
         let host: NSView
         if popup {
@@ -180,6 +179,9 @@ enum Browsers {
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
+        // A popup has no ContentView.dress() to tie the browser to its window;
+        // tied here, before extensions hear of it (#408, lulkebit).
+        browser.window = window
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.contentView = host
@@ -199,6 +201,10 @@ enum Browsers {
             window.center()
         }
         frames[ObjectIdentifier(browser)] = window
+        // Extensions hear of the window only now, with its real frame there
+        // to report: told first, a popup's windows.update and getCurrent met
+        // a window with no frame and no NSWindow behind it (#408, lulkebit).
+        register(browser)
         Bench.keepOff(window)
         window.makeKeyAndOrderFront(nil)
         comeForward()

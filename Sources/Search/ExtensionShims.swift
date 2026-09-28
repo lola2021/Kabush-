@@ -2287,6 +2287,33 @@ enum ExtensionShims {
           });
         }
         for (const name of ["get", "getAll", "getCurrent", "getLastFocused", "create"]) mendResult(chrome.windows, name);
+        // WebKit's windows.getCurrent ignores which extension page called
+        // it and returns the frontmost window. In a top-level extension page
+        // opened in a tab — a popup window's page among them (Bitwarden's
+        // passkey window) — find that page's current tab each time and ask
+        // for its window instead. When there is no real tab, as in a toolbar
+        // action popup or an offscreen page, keep WebKit's answer; workers
+        // and content scripts never enter here. From #408, by lulkebit.
+        if (!inContent && !embedded && typeof document !== "undefined"
+            && chrome.windows && typeof chrome.windows.getCurrent === "function"
+            && typeof chrome.windows.get === "function" && typeof chrome.tabs.getCurrent === "function") {
+          const getCurrentWindow = chrome.windows.getCurrent.bind(chrome.windows);
+          const getWindow = chrome.windows.get.bind(chrome.windows);
+          const getCurrentTab = chrome.tabs.getCurrent.bind(chrome.tabs);
+          put(chrome.windows, "getCurrent", (...args) => {
+            const callback = typeof args[args.length - 1] === "function" ? args.pop() : null;
+            const getInfo = typeof args[0] === "function" ? undefined : args[0];
+            const options = getInfo === undefined ? [] : [getInfo];
+            const p = Promise.resolve().then(() => getCurrentTab()).then((tab) => {
+              const windowId = tab && tab.windowId;
+              const hasPlace = tab && Number.isInteger(tab.index) && tab.index >= 0 && tab.index < 1e6
+                && Number.isInteger(windowId) && windowId >= 0;
+              return hasPlace ? getWindow(windowId, ...options) : getCurrentWindow(...options);
+            }, () => getCurrentWindow(...options));
+            if (!callback) return p;
+            p.then((window) => callback(window), (error) => withLastError(error, callback));
+          });
+        }
         // Listeners given a tab: the tab is mended before they see it.
         const mendArgs = (target, positions, told, skip) => {
           if (!target || typeof target.addListener !== "function") return;

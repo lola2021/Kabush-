@@ -28,6 +28,7 @@ in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- An extension's popup window answers for itself: windows.getCurrent from its page gives that window rather than the one in front, so Bitwarden's passkey window finds and sizes itself, and the window is tied to its page before the extension hears of it. Thanks [@lulkebit](https://github.com/lulkebit) ([#408](https://github.com/driceroland/Search/pull/408))
 - The floating video fills its window on players built like Twitch's: an ancestor with a transform, a filter or containment placed the video inside its own box, so part of the picture or none of it showed, and one drawn only on screen or faded out left the window black.
 - Many tabs no longer slow the tabs down: with tab groups on, each tab worked out the width of every other, so a space of 300 tabs took more than a second to leave; it takes a few hundredths now. Going back to a space no longer reads its whole file again either.
 - Signing in with a passkey works on GitHub again: after Touch ID the site couldn't read the passkey Search handed back (its sign-in code sets a method on it that Search had made read-only). Thanks [@neerajyadav](https://github.com/neerajyadav) ([#407](https://github.com/driceroland/Search/issues/407))
